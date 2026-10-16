@@ -238,7 +238,7 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <div class="pager"><span id="bsInfo" class="muted"></span><button class="btn" id="bsMore">顯示更多</button></div>
     <h2 style="margin-top:14px">各訊號的歷史驗證（樣本外）</h2>
     <div class="scroll" id="bsStats"></div>
-    <p class="hint">每種訊號只在條件「第一天成立」時算一次。驗證方式：把歷史依時間分成前 70%（用來設定條件）與後 30%（樣本外，只用來檢驗，中間空出 63 個交易日避免重疊），統計樣本外每次觸發後 20、63 個交易日的表現。超額報酬是和同一天全市場（流動性足夠）報酬中位數相比；打敗大盤比例是超額報酬為正的比例。標示「有效」的條件：樣本外至少 50 次、20 日平均超額 ≥ 0.3%、打敗大盤比例 ≥ 51%，且 63 日平均超額為正。這些都是機率上的優勢，不保證個股會上漲。</p>
+    <p class="hint">每種訊號只在條件「第一天成立」時算一次。驗證方式：把歷史依時間分成前 70%（用來設定條件）與後 30%（樣本外，只用來檢驗，中間空出 63 個交易日避免重疊），統計樣本外每次觸發後 20、63 個交易日的表現。超額報酬是和同一天全市場（流動性足夠的股票）平均報酬相比，每天先去除前後 1% 的極端值；打敗大盤比例是報酬高於同一天中位數的比例（基準約 50%）。標示「有效」的條件：樣本外至少 50 次、20 日平均超額 ≥ 0.3%、打敗大盤比例 ≥ 51%、20 日上漲比例不低於基準，且 63 日平均超額為正。標示「資料累積中」的訊號，所需資料（例如集保大戶、主力資金）是從開始執行起才累積，還無法驗證。這些都是機率上的優勢，不保證個股會上漲。</p>
   </section>
 
   <section class="pulse" id="pulse" aria-label="市場籌碼概況"></section>
@@ -710,9 +710,9 @@ function renderSigStats(defs){
   const b = defs[keys[0]].base || {}, sp = defs[keys[0]].split || {};
   const pc = v => v == null ? "—" : pct(v), ex = v => v == null ? "—" : `<span class="${tone(v)}">${v>0?"+":""}${fmt(v,2)}%</span>`;
   el.innerHTML = `<table class="mq"><thead><tr><th>訊號</th><th>狀態</th><th>樣本外次數</th><th>20日上漲比例</th><th>20日平均超額</th><th>20日打敗大盤</th><th>63日上漲比例</th><th>63日平均超額</th></tr></thead><tbody>
-    <tr><td class="muted">基準（所有股票、所有日子）</td><td></td><td class="num muted">${fmt(b["20"]?.n,0)}</td><td class="num muted">${pc(b["20"]?.hit)}</td><td class="num muted">0%</td><td class="num muted">50%</td><td class="num muted">${pc(b["63"]?.hit)}</td><td class="num muted">0%</td></tr>
+    <tr><td class="muted">基準（所有股票、所有日子）</td><td></td><td class="num muted">${fmt(b["20"]?.n,0)}</td><td class="num muted">${pc(b["20"]?.hit)}</td><td class="num muted">${ex(b["20"]?.excess)}</td><td class="num muted">${pc(b["20"]?.beat)}</td><td class="num muted">${pc(b["63"]?.hit)}</td><td class="num muted">${ex(b["63"]?.excess)}</td></tr>
     ${keys.map(k => { const d = defs[k], o = d.oos || {};
-      return `<tr title="${esc(d.desc)}"><td>${esc(d.name)}</td><td><span class="pill ${d.valid?"ok2":"ng"}">${d.valid?"有效":"未通過"}</span></td><td class="num">${fmt(o["20"]?.n,0)}</td>
+      return `<tr title="${esc(d.desc)}"><td>${esc(d.name)}</td><td>${(o["20"]?.n||0) < 50 ? `<span class="pill third" title="樣本外觸發不到 50 次，這類資料從開始執行起才累積">資料累積中</span>` : `<span class="pill ${d.valid?"ok2":"ng"}">${d.valid?"有效":"未通過"}</span>`}</td><td class="num">${fmt(o["20"]?.n,0)}</td>
         <td class="num">${pc(o["20"]?.hit)}</td><td class="num">${ex(o["20"]?.excess)}</td><td class="num">${pc(o["20"]?.beat)}</td><td class="num">${pc(o["63"]?.hit)}</td><td class="num">${ex(o["63"]?.excess)}</td></tr>`; }).join("")}
   </tbody></table><p class="hint" style="margin-top:6px">樣本內 ${esc(sp.is||"")}，樣本外 ${esc(sp.oos||"")}。滑鼠移到訊號名稱可看條件。</p>`;
 }

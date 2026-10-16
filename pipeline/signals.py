@@ -92,15 +92,15 @@ def compute(fs: FactorSet, scores: dict) -> dict[str, pd.DataFrame]:
     return {k: (v.fillna(False).astype(bool) & liq.fillna(False).astype(bool)) for k, v in ev.items()}
 
 
-def _stats(mask: np.ndarray, fwd: np.ndarray, exc: np.ndarray) -> dict:
+def _stats(mask: np.ndarray, fwd: np.ndarray, exc: np.ndarray, rel: np.ndarray) -> dict:
     sel = mask & ~np.isnan(fwd)
     n = int(sel.sum())
     if n == 0:
         return {"n": 0}
-    f, e = fwd[sel], exc[sel]
+    f, e, r = fwd[sel], exc[sel], rel[sel]
     return {"n": n, "hit": round(float((f > 0).mean()), 3), "mean": round(float(f.mean()), 2),
             "median": round(float(np.median(f)), 2), "excess": round(float(e.mean()), 2),
-            "beat": round(float((e > 0).mean()), 3)}
+            "beat": round(float((r > 0).mean()), 3)}
 
 
 def evaluate(fs: FactorSet, events: dict[str, pd.DataFrame]) -> dict:
@@ -116,8 +116,14 @@ def evaluate(fs: FactorSet, events: dict[str, pd.DataFrame]) -> dict:
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
+            # winsorize each day at the 1st/99th percentile so a few bad prices cannot drive averages
+            lo, hi = np.nanpercentile(fwd, 1, axis=1, keepdims=True), np.nanpercentile(fwd, 99, axis=1, keepdims=True)
+            fwd = np.clip(fwd, lo, hi)
+            mean = np.nanmean(fwd, axis=1, keepdims=True)     # equal-weighted market return that day
             med = np.nanmedian(fwd, axis=1, keepdims=True)
-        fw[hk] = (fwd, fwd - med)
+        # excess vs the same-day market MEAN (so the base rate's average excess is ~0);
+        # "beat" vs the same-day MEDIAN (so the base rate is ~50%)
+        fw[hk] = (fwd, fwd - mean, fwd - med)
     known = ~np.all(np.isnan(fw["63"][0]), axis=1)
     kd = np.where(known)[0]
     if len(kd) < 100:
@@ -129,15 +135,16 @@ def evaluate(fs: FactorSet, events: dict[str, pd.DataFrame]) -> dict:
         e = ev.values
         res = {"name": DEFS[k][0], "desc": DEFS[k][1], "is": {}, "oos": {}, "base": {}}
         for hk in HORIZONS:
-            fwd, exc = fw[hk]
-            res["is"][hk] = _stats(e & is_rows[:, None], fwd, exc)
-            res["oos"][hk] = _stats(e & oos_rows[:, None], fwd, exc)
-            res["base"][hk] = _stats(liq & oos_rows[:, None], fwd, exc)
+            fwd, exc, rel = fw[hk]
+            res["is"][hk] = _stats(e & is_rows[:, None], fwd, exc, rel)
+            res["oos"][hk] = _stats(e & oos_rows[:, None], fwd, exc, rel)
+            res["base"][hk] = _stats(liq & oos_rows[:, None], fwd, exc, rel)
         o, b = res["oos"]["20"], res["base"]["20"]
         o63 = res["oos"]["63"]
         # valid = worked OUT OF SAMPLE: beat the same-day market median on average and more often than not
         res["valid"] = bool(o.get("n", 0) >= MIN_OOS_EVENTS and o.get("excess", -1) >= MIN_EXCESS_20
-                            and o.get("beat", 0) >= MIN_BEAT_20 and o63.get("excess", -1) > 0)
+                            and o.get("beat", 0) >= MIN_BEAT_20 and o63.get("excess", -1) > 0
+                            and o.get("hit", 0) >= b.get("hit", 1))
         res["split"] = {"is": f"{cal[kd[0]].date()} ~ {cal[split - 1].date()}",
                         "oos": f"{cal[min(len(cal) - 1, split + HORIZONS['63'])].date()} ~ {cal[kd[-1]].date()}"}
         out[k] = res
