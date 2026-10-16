@@ -170,5 +170,7 @@ def drain_checks():
         return pd.DataFrame()
     df = pd.DataFrame(CHECKS)
     CHECKS.clear()
-    df["date"] = pd.to_datetime(df["date"])
-    return df
+    # checks come from different sources: "2026-10-16", "20261008", Timestamps ...
+    df["date"] = pd.to_datetime(df["date"].astype(str).str.replace("-", "", regex=False).str[:8],
+                                format="%Y%m%d", errors="coerce")
+    return df.dropna(subset=["date"])
