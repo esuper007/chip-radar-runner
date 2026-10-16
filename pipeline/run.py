@@ -22,6 +22,17 @@ from .store import Store
 MARKETS = ["tw", "us", "jp", "hk", "cn"]
 
 
+# Local closing time (+30 min buffer) per market; a bar dated today before this is an intraday snapshot.
+CLOSE_LOCAL = {"tw": 14.0, "jp": 16.0, "hk": 16.75, "cn": 15.5, "us": 17.0}
+
+
+def last_complete_day(market: str, tz: int) -> dt.date:
+    """The latest date whose session has closed in the market's local time."""
+    now = dt.datetime.utcnow() + dt.timedelta(hours=tz)
+    closed = now.hour + now.minute / 60 >= CLOSE_LOCAL.get(market, 17.0)
+    return now.date() if closed else now.date() - dt.timedelta(days=1)
+
+
 def mod(market: str):
     return importlib.import_module(f"pipeline.markets.{market}")
 
@@ -62,7 +73,7 @@ def cmd_prices(a):
     from . import prices
     m, st = mod(a.market), Store(a.market)
     st.pull()
-    prices.update(st, m.symbols(st), years_back=a.years)
+    prices.update(st, m.symbols(st), years_back=a.years, last_day=last_complete_day(a.market, m.TZ))
     st.push()
 
 
@@ -71,6 +82,11 @@ def cmd_build(a):
     from .factors import compute_scores
     m, st = mod(a.market), Store(a.market)
     st.pull()
+    cut = last_complete_day(a.market, m.TZ)
+    px = st.load("price")
+    if not px.empty and (pd.to_datetime(px["date"]) > pd.Timestamp(cut)).any():
+        log.warning("ignoring intraday price rows after %s (session not closed yet)", cut)
+        st._cache["price"] = px[pd.to_datetime(px["date"]) <= pd.Timestamp(cut)]
     fs = m.build_factors(st)
     log.info("factors: %d days x %d codes, %d factors", len(fs.calendar), len(fs.codes), len(fs.factors))
     scores = compute_scores(fs)

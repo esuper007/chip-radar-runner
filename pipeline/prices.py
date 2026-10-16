@@ -63,17 +63,20 @@ def download(symbols: dict[str, str], start: dt.date, end: dt.date | None = None
     return res
 
 
-def update(store: Store, symbols: dict[str, str], years_back: int = 12) -> None:
-    """Incremental: refetch last 10 days (adjustments) for known codes, full history for new ones."""
+def update(store: Store, symbols: dict[str, str], years_back: int = 12, last_day: dt.date | None = None) -> None:
+    """Incremental: refetch last 10 days (adjustments) for known codes, full history for new ones.
+    Bars after `last_day` (a session that has not closed yet) are intraday snapshots and are dropped."""
+    def done(df):
+        return df if last_day is None or df.empty else df[pd.to_datetime(df["date"]) <= pd.Timestamp(last_day)]
     have = store.load("price")
     today = dt.date.today()
     known = set(have["code"].unique()) if not have.empty else set()
     new = {c: s for c, s in symbols.items() if c not in known}
     old = {c: s for c, s in symbols.items() if c in known}
     if new:
-        store.append("price", download(new, today.replace(year=today.year - years_back)))
+        store.append("price", done(download(new, today.replace(year=today.year - years_back))))
     if old:
-        recent = download(old, today - dt.timedelta(days=10))
+        recent = done(download(old, today - dt.timedelta(days=10)))
         store.append("price", recent)
         # Dividends/splits change the whole adjusted history: rescale stored adj_close
         # when the latest overlapping ratio moved (cheap fix, avoids full re-download).
