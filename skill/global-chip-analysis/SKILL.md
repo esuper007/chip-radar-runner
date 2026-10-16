@@ -16,7 +16,7 @@ description: 全球股票籌碼分析（台、美、日、港、陸股）：法�
 ```bash
 git clone --depth 1 --branch dist https://github.com/esuper007/chip-radar /tmp/chip-dist
 ```
-若 clone 失敗（403/404），先用 `add_repo`（owner `esuper007`、repo `chip-radar`）把 repo 加進這個工作階段再 clone。注意：公開 repo 的執行紀錄任何人都看得到，不要在程式裡印出資料數值或 email。
+若 clone 失敗（403/404），先用 `add_repo`（owner `esuper007`、repo `chip-radar`）把 repo 加進這個工作階段再 clone。
 
 每個市場的檔案（副檔名是 .js，內容是純 JSON）：
 | 檔案 | 內容 |
@@ -64,11 +64,9 @@ row = next(r for r in s['rows'] if r['c'] == '2330')
 - **同步儀表板**：用 `list_triggers` 找名為「籌碼雷達：同步儀表板」的排程工作，用 `fire_trigger` 觸發。
 - **重新抓資料並重算**：觸發 runner repo 的 GitHub Actions（先用 `add_repo` 加入 `chip-radar-runner`，access `push`）：
   ```bash
-  curl -X POST -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" \
-    https://api.github.com/repos/esuper007/chip-radar-runner/actions/workflows/market-daily.yml/dispatches \
-    -d '{"ref":"main","inputs":{"market":"tw"}}'
+  gh api -X POST repos/esuper007/chip-radar-runner/actions/workflows/market-daily.yml/dispatches -f ref=main -f 'inputs[market]=tw'
   ```
-  五個市場一次更新：改送 `all-markets.yml`（`{"ref":"main"}`，依序跑台、日、港、陸、美股）。同一時間只會有一個在執行、一個在排隊；查進度用 `GET .../actions/workflows/<檔名>/runs?per_page=5`。
+  五個市場一次更新：改送 `all-markets.yml`（只要 `-f ref=main`，依序跑台、日、港、陸、美股）。同一時間只會有一個在執行、一個在排隊；查進度用 `GET .../actions/workflows/<檔名>/runs?per_page=5`。
   抓資料時若某天只公布了一部分（例如上櫃有、上市還沒出），筆數明顯偏少的近期日期會在下次執行自動重抓。
 - **回補歷史**：`backfill.yml`，輸入 `market`、`start`（YYYY-MM-DD），會自動分段接力。
 - **重新訓練模型與回測**：`weekly-model.yml`（每週六自動執行；平日只載入存好的模型）。
@@ -77,4 +75,4 @@ row = next(r for r in s['rows'] if r['c'] == '2330')
 
 - 各市場因子在 `pipeline/markets/<市場>.py` 的 `build_factors()`，評分面向與權重在同一函式的 `spec`、`weights`。
 - 預測方法在 `pipeline/predict.py`；回測一律保留「訓練資料的標籤期間必須在測試期間開始前結束」的規則，避免偷看未來。
-- 程式改在 `chip-radar-runner` 的 main 分支。改完先用 `tests/synthetic_tw.py` 產生假資料跑 `python -m pipeline.run build tw --backtest` 確認不會壞，再 push。
+- 程式改在 `chip-radar-runner` 的 main 分支。這個 repo 和它的執行紀錄是公開的：程式只能記錄欄位名稱與筆數，不要印出資料數值、email 或權杖。改完先用 `tests/synthetic_tw.py` 產生假資料跑 `python -m pipeline.run build tw --backtest` 確認不會壞，再 push。
