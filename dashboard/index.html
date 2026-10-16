@@ -189,12 +189,12 @@ body.usconv .pill.ok{color:var(--up)}
     <div class="sec-head"><h2>每日預測排行（前 20 名）</h2>
       <div class="toolbar">
         <select id="rkH" aria-label="預測期間"><option value="1q">1季</option><option value="6m">半年</option><option value="1y">1年</option></select>
-        <select id="rkM" aria-label="預測方法"><option value="avg">三種方法平均</option><option value="ml">機器學習</option><option value="is">樣本內外模型</option><option value="an">歷史相似</option></select>
+        <select id="rkM" aria-label="預測方法"><option value="avg">加權綜合（樣本內外 70%）</option><option value="ml">機器學習</option><option value="is">樣本內外模型</option><option value="an">歷史相似</option></select>
         <label><input type="checkbox" id="rkLiq" checked> 只看流動性足夠</label>
         <label><input type="checkbox" id="rkFund" checked> 排除基金／ETF</label>
       </div></div>
     <div class="rank4" id="rank"></div>
-    <p class="hint">上漲機率是模型估計的「期間結束時股價高於現在」的機率，下跌機率＝1－上漲機率；漲跌幅是含息報酬的中位數預估。排行只代表模型的相對看法，可信度請對照下方的回測成績。點一列看詳細籌碼，按 ☆ 加入觀察清單。</p>
+    <p class="hint">上漲機率是模型估計的「期間結束時股價高於現在」的機率，下跌機率＝1－上漲機率；漲跌幅是含息報酬的中位數預估。「加權綜合」以樣本內外模型為主（70%），機器學習與歷史相似各占 15%；某方法沒有數值時，權重按其餘方法重新分配。排行只代表模型的相對看法，可信度請對照下方的回測成績。點一列看詳細籌碼，按 ☆ 加入觀察清單。</p>
   </section>
 
   <section class="pulse" id="pulse" aria-label="市場籌碼概況"></section>
@@ -531,8 +531,12 @@ async function explain(r){
 
 // ---------- daily forecast rankings ----------
 const avgOf = xs => { xs = xs.filter(x => x != null); return xs.length ? xs.reduce((p,c)=>p+c,0)/xs.length : null; };
-const pUp = (r,h,m) => m === "avg" ? avgP(r,h) : (r.fc?.[m]?.[h]?.p_up ?? null);
-const q50 = (r,h,m) => m === "avg" ? avgOf(["an","ml","is"].map(k => r.fc?.[k]?.[h]?.q50)) : (r.fc?.[m]?.[h]?.q50 ?? null);
+// Ranking blend: in/out-of-sample model 70%, machine learning 15%, historical analogs 15%
+// (weights are renormalised over the methods that have a value for this stock).
+const RANK_W = {is: 0.70, ml: 0.15, an: 0.15};
+const wAvg = (r,h,stat) => { let s = 0, w = 0; for (const [k,wt] of Object.entries(RANK_W)){ const v = r.fc?.[k]?.[h]?.[stat]; if (v != null){ s += v*wt; w += wt; } } return w ? s/w : null; };
+const pUp = (r,h,m) => m === "avg" ? wAvg(r,h,"p_up") : (r.fc?.[m]?.[h]?.p_up ?? null);
+const q50 = (r,h,m) => m === "avg" ? wAvg(r,h,"q50") : (r.fc?.[m]?.[h]?.q50 ?? null);
 const sgn = v => v == null ? "—" : (v > 0 ? "+" : "") + fmt(v,1) + "%";
 for (const id of ["rkH","rkM"]){ const v = store.get(id); if (v && [...$(id).options].some(o => o.value === v)) $(id).value = v; }
 for (const id of ["rkLiq","rkFund"]) if (store.get(id) === "0") $(id).checked = false;
