@@ -174,6 +174,23 @@ class Store:
             return None
 
     def save_meta(self, name: str, obj) -> None:
+        """Small JSON state kept next to the data (e.g. optimized parameters); uploaded right away."""
         import json
         p = self.dir / f"{name}.json"
         p.write_text(json.dumps(obj, ensure_ascii=False, default=str, indent=1))
+        if IN_CI:
+            if _gh("release", "view", self.tag, check=False).returncode != 0:
+                _gh("release", "create", self.tag, "--title", f"Data store: {self.market}",
+                    "--notes", "Auto-managed history store. Do not edit by hand.", "--latest=false")
+            self._upload([str(p)])
+
+    def load_meta(self, name: str):
+        import json
+        p = self.dir / f"{name}.json"
+        if IN_CI and not p.exists():
+            _gh("release", "download", self.tag, "-D", str(self.dir), "--clobber", "-p", p.name, check=False)
+        try:
+            return json.loads(p.read_text()) if p.exists() else None
+        except Exception as e:
+            log.warning("could not read %s: %s", p.name, e)
+            return None

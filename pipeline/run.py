@@ -130,7 +130,7 @@ def cmd_build(a):
         sig = None
     from . import surge
     try:
-        sg = surge.compute(fs, scores)
+        sg = surge.compute(fs, scores, st)
     except Exception:
         log.exception("surge similarity failed")
         sg = None

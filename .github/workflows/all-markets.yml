@@ -2,6 +2,8 @@ name: all-markets
 # Run the daily update for every market one after another (used by the dashboard's full refresh).
 on:
   workflow_dispatch:
+    inputs:
+      surge_optimize: { description: "re-run the surge window optimization now (normally once per quarter)", type: boolean, default: false }
 permissions:
   contents: write
   actions: write
@@ -25,6 +27,7 @@ jobs:
       GH_REPO: ${{ vars.DATA_REPO || 'esuper007/chip-radar' }}
       SEC_CONTACT: ${{ secrets.SEC_CONTACT }}
       MARKET: ${{ matrix.market }}
+      SURGE_OPTIMIZE: ${{ github.event.inputs.surge_optimize == 'true' && '1' || '' }}
       LOG_FILE: dist/_logs/${{ matrix.market }}.log
     steps:
       - name: Check secrets

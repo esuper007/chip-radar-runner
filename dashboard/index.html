@@ -66,6 +66,7 @@ svg text{fill:var(--muted);font-family:var(--f-num);font-size:10px}
 .mq th,.mq td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
 .mq th:first-child,.mq td:first-child{text-align:left}
 .mq thead th{color:var(--muted);font-weight:500}
+.mq tr.best td{background:var(--accent-soft)}
 .scroll{overflow-x:auto}
 
 /* screener */
@@ -260,6 +261,7 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <div class="dq" style="margin-top:12px">
       <div><h2>歷史驗證（逐年往前，不使用未來資料）</h2><div class="scroll" id="sgVal"></div></div>
       <div><h2>歷年飆股起漲前最與眾不同的籌碼特徵</h2><div id="sgTraits" class="scroll"></div></div>
+      <div><h2>天數最佳化（每季底重新計算）</h2><div id="sgOpt" class="scroll"></div></div>
     </div>
     <p class="hint">做法：每年漲幅前 N% 的股票（流動性足夠者）為「飆股」，以它起漲前的最低點為基準，取低點前 A 個交易日到低點後 B 個交易日的籌碼（各子分數與評分因子的全市場百分位，取低點前、低點後的平均及兩者差）。和同期所有股票比較，找出飆股明顯不同的特徵並依差異大小加權，再計算每檔股票最近 A+B 個交易日的籌碼和這個樣貌的相似度。股價本身不列入比對，避免變成單純追漲。驗證時只用前幾年的飆股建立樣貌，檢查之後每月相似度前 50 名在接下來一年成為前 N% 的比例，和隨機的 N% 比較；提升倍數 ≥ 1.3 且一年超額報酬為正才標示「有效」。</p>
   </section>
@@ -320,12 +322,12 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
   <div class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="sgDlgTitle">
     <h3 id="sgDlgTitle">修改「起漲前」的定義</h3>
     <div class="cf-fields">
-      <label>起漲前最低點「往前」幾個交易日 <input type="number" id="sgPre" min="10" max="250" step="1" inputmode="numeric"></label>
+      <label>起漲前最低點「往前」幾個交易日 <input type="number" id="sgPre" min="0" max="250" step="1" inputmode="numeric"></label>
       <label>起漲前最低點「往後」幾個交易日 <input type="number" id="sgPost" min="0" max="120" step="1" inputmode="numeric"></label>
       <label>飆股標準：每年漲幅前幾 % <input type="number" id="sgTop" min="1" max="30" step="1" inputmode="numeric"></label>
     </div>
-    <p class="note" id="sgDlgNote" style="margin:0">送出後五個市場會用新定義重新計算並驗證，約需 1 小時，完成後自動同步。範圍：往前 10–250、往後 0–120、前 1–30%。</p>
-    <div class="confirm-actions"><button class="btn" id="sgCancel">取消</button><button class="btn" id="sgReset">恢復 89／34／10%</button><button class="btn primary" id="sgOk">確定執行</button></div>
+    <p class="note" id="sgDlgNote" style="margin:0">預設是「自動最佳化」：每個市場每季底在往前＋往後＝123 日（每次調整 17 日）的 8 種組合中，挑歷史驗證最好的一組。按「確定執行」會改用你填的天數（五個市場共用），直到你按「改回自動最佳化」。送出後五個市場會重新計算並驗證，約需 1 小時，完成後自動同步。範圍：往前 0–250、往後 0–120、前 1–30%。</p>
+    <div class="confirm-actions"><button class="btn" id="sgCancel">取消</button><button class="btn" id="sgAuto">改回自動最佳化</button><button class="btn primary" id="sgOk">確定執行</button></div>
   </div>
 </div>
 
@@ -763,7 +765,8 @@ const SG = {shown: 50};
 $("sgMore").onclick = () => { SG.shown += 50; renderSurge(); };
 function renderSurge(){
   const sc = S.screen[S.market], sg = S.summary[S.market]?.surge || {}, tb = $("sgRows"), p = sg.params || {pre: 89, post: 34, top_pct: 10};
-  $("sgParams").innerHTML = `起漲前定義：低點往前 <b>${p.pre}</b> 日、往後 <b>${p.post}</b> 日｜飆股：年漲幅前 <b>${p.top_pct}%</b>`;
+  const SRC = {optimized: "本季最佳化", manual: "手動設定・五市場共用", default: "預設"};
+  $("sgParams").innerHTML = `起漲前定義：低點往前 <b>${p.pre}</b> 日、往後 <b>${p.post}</b> 日${p.source ? `（${SRC[p.source] || esc(p.source)}）` : ""}｜飆股：年漲幅前 <b>${p.top_pct}%</b>`;
   const v = sg.validation || {};
   $("sgStatus").innerHTML = sg.status === "ok"
     ? `以 ${esc(sg.years?.[0])}–${esc(sg.years?.[1])} 年共 ${fmt(sg.n_winners,0)} 檔次飆股建立樣貌。驗證：<span class="pill ${sg.valid ? "ok2" : "ng"}">${sg.valid ? "有效" : "未通過"}</span> 相似度前 50 名成為飆股的比例 ${v.precision != null ? pct(v.precision) : "—"}，隨機為 ${pct(v.base)}（提升 ${v.lift != null ? fmt(v.lift,2) + " 倍" : "—"}）。`
@@ -792,6 +795,16 @@ function renderSurgeVal(sg){
   $("sgTraits").innerHTML = (sg.traits || []).length ? `<table class="mq"><thead><tr><th>特徵</th><th>和一般股票的差異（標準差）</th></tr></thead><tbody>
     ${sg.traits.map(t => `<tr><td>${esc(t.name)}</td><td class="num ${tone(t.d)}">${t.d > 0 ? "+" : ""}${fmt(t.d,2)}</td></tr>`).join("")}</tbody></table>
     <p class="hint" style="margin-top:6px">正值代表飆股起漲前這項指標的全市場排名明顯偏高，負值代表偏低。</p>` : `<span class="muted">—</span>`;
+  const o = sg.optimization, sp = sg.params || {};
+  if (!o || !(o.grid || []).length){
+    $("sgOpt").innerHTML = `<span class="muted">${sp.source === "manual" ? "目前使用手動設定的天數，沒有進行最佳化。" : "尚未最佳化（籌碼歷史累積足夠後，每季底自動計算）。"}</span>`;
+  } else {
+    const h = o.honest;
+    $("sgOpt").innerHTML = `<table class="mq"><thead><tr><th>往前</th><th>往後</th><th>提升倍數</th><th>一年超額</th><th>驗證</th></tr></thead><tbody>
+      ${o.grid.map(g => { const b = o.best && g.pre === o.best.pre && g.post === o.best.post;
+        return `<tr${b ? ' class="best"' : ""}><td class="num">${b ? "<b>" + g.pre + "</b>" : g.pre}</td><td class="num">${b ? "<b>" + g.post + "</b>" : g.post}</td><td class="num">${fmt(g.lift,2)}</td><td class="num ${tone(g.excess_252)}">${g.excess_252 > 0 ? "+" : ""}${fmt(g.excess_252,2)}%</td><td><span class="pill ${g.valid ? "ok2" : "ng"}">${g.valid ? "通過" : "未通過"}</span></td></tr>`; }).join("")}</tbody></table>
+      <p class="hint" style="margin-top:6px">資料截至 ${esc(o.quarter)} 季底（${esc(o.optimized_at)} 計算）。粗體是提升倍數最高、目前採用的組合。${h ? `從 8 組挑最好的會讓成績看起來偏好，所以另做誠實檢驗：每一年都只用「之前年度」表現最好的組合，結果提升 ${fmt(h.lift,2)} 倍、一年超額 ${h.excess_252 > 0 ? "+" : ""}${fmt(h.excess_252,2)}%，<span class="pill ${h.valid ? "ok2" : "ng"}">${h.valid ? "通過" : "未通過"}</span>。這個數字比上表的最佳值更接近實際使用時能期待的效果。` : ""}</p>`;
+  }
 }
 $("sgRows").addEventListener("click", async e => {
   const st = e.target.closest("[data-star]"); if (st){ e.stopPropagation(); await wlToggle(st.dataset.star); return; }
@@ -807,13 +820,17 @@ function openSgDlg(){
 function closeSgDlg(){ $("sgDlg").hidden = true; sgReturn?.focus?.(); }
 $("sgEdit").onclick = openSgDlg;
 $("sgCancel").onclick = closeSgDlg;
-$("sgReset").onclick = () => { $("sgPre").value = 89; $("sgPost").value = 34; $("sgTop").value = 10; };
+$("sgAuto").onclick = () => {
+  const top = Math.round(Number($("sgTop").value));
+  if (!(top >= 1 && top <= 30)){ $("sgDlgNote").textContent = "飆股標準需介於前 1–30%。"; return; }
+  closeSgDlg(); fire("surge", `surge auto top=${top}`);
+};
 $("sgDlg").addEventListener("click", e => { if (e.target === $("sgDlg")) closeSgDlg(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("sgDlg").hidden) closeSgDlg(); });
 $("sgOk").onclick = () => {
   const pre = Math.round(Number($("sgPre").value)), post = Math.round(Number($("sgPost").value)), top = Math.round(Number($("sgTop").value));
-  if (!(pre >= 10 && pre <= 250 && post >= 0 && post <= 120 && top >= 1 && top <= 30)){
-    $("sgDlgNote").textContent = "數值超出範圍：往前 10–250、往後 0–120、前 1–30%。"; return; }
+  if (!(pre >= 0 && pre <= 250 && post >= 0 && post <= 120 && top >= 1 && top <= 30)){
+    $("sgDlgNote").textContent = "數值超出範圍：往前 0–250、往後 0–120、前 1–30%。"; return; }
   closeSgDlg(); fire("surge", `surge pre=${pre} post=${post} top=${top}`);
 };
 
