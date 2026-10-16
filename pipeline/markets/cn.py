@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import unicodedata
 
 import pandas as pd
 
@@ -189,7 +190,8 @@ def fetch_universe() -> pd.DataFrame:
         df = _ak().stock_zh_a_spot_em()
     log_fields_once("cn-universe", df.columns)
     out = pd.DataFrame({"code": _norm_code(df[_pick(df, "code") or _pick(df, "代码")]),
-                        "name": df[_pick(df, "name") or _pick(df, "名称")]})
+                        "name": df[_pick(df, "name") or _pick(df, "名称")].astype(str)
+                                .map(lambda x: re.sub(r"\s+", "", unicodedata.normalize("NFKC", x)))})   # "万  科Ａ" -> "万科A"
     out = out[out["code"].fillna("").str.match(CODE_RE)]
     out["mkt"] = out["code"].map(lambda c: "SSE" if c.startswith("6") else "SZSE")
     out["industry"] = ""

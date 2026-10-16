@@ -169,7 +169,31 @@ def fetch_universe() -> pd.DataFrame:
     out = pd.DataFrame({"code": df["Stock Code"].map(_code), "name": df[next(c for c in df.columns if "Name" in c)],
                         "mkt": df[sub].astype(str).str.contains("GEM").map({True: "GEM", False: "Main"}) if sub else "HKEX",
                         "industry": ""})
-    return out.dropna(subset=["code"])
+    out = out.dropna(subset=["code"])
+    zh = fetch_chinese_names()
+    if zh:
+        out["name_en"] = out["name"]
+        out["name"] = out["code"].map(zh).fillna(out["name"])
+        log.info("hk universe: %d of %d names in Chinese", int(out["code"].isin(zh.keys()).sum()), len(out))
+    return out
+
+
+def fetch_chinese_names() -> dict:
+    """Traditional Chinese short names from HKEX's Chinese List of Securities."""
+    try:
+        b = http_get("https://www.hkex.com.hk/chi/services/trading/securities/securitieslists/ListOfSecurities_c.xlsx",
+                     retries=2).content
+        raw = pd.read_excel(io.BytesIO(b), header=None)
+        hdr = next(i for i in range(15) if any("代號" in str(v) for v in raw.iloc[i]))
+        cols = [str(v).strip() for v in raw.iloc[hdr]]
+        log_fields_once("hk-universe-zh", cols)
+        ic = next(i for i, c in enumerate(cols) if "代號" in c)
+        iname = next(i for i, c in enumerate(cols) if "名稱" in c)
+        body = raw.iloc[hdr + 1:]
+        return {k: str(v).strip() for k, v in zip(body.iloc[:, ic].map(_code), body.iloc[:, iname]) if k and str(v).strip() not in ("", "nan")}
+    except Exception as e:
+        log.warning("hk Chinese names: %s", e)
+        return {}
 
 
 def purge_bad_southbound(store: Store) -> None:

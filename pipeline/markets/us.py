@@ -9,6 +9,9 @@ Datasets:
   activist   SEC SC 13D / 13G filings per subject company                          daily
   ftd        SEC fails-to-deliver (also gives CUSIP->ticker map)                  semi-monthly
   inst13f    SEC Form 13F holdings aggregated per CUSIP (shares, #managers)        quarterly
+  funds      tickers that are funds, excluded from the stock universe:              monthly
+             CIKs filing N-CSR / N-CSRS / N-CEN / NPORT-P (closed-end funds, ETFs, other
+             registered investment companies) + Nasdaq Trader symbol directory ETF flag
 """
 from __future__ import annotations
 
@@ -56,6 +59,69 @@ def fetch_shares() -> pd.DataFrame:
     df = pd.concat(frames)
     df = df.sort_values("end").drop_duplicates("cik", keep="last")
     return df[["cik", "val", "end"]].rename(columns={"val": "shares"})
+
+
+# N-2 is left out on purpose: business development companies (e.g. ARCC) file it but report like
+# operating companies (10-K/10-Q) and trade as stocks.
+FUND_FORMS = {"N-CSR", "N-CSRS", "N-CSR/A", "N-CSRS/A", "N-CEN", "N-CEN/A", "NPORT-P", "NPORT-P/A", "N-30D"}
+
+
+def fetch_funds(today: dt.date | None = None) -> pd.DataFrame:
+    """Codes to exclude: registered investment companies (closed-end funds, ETFs, interval funds).
+
+    Source 1 (SEC, official): every CIK that filed a fund report (N-CSR, N-CEN, NPORT-P, ...) in the
+    last four quarters of the EDGAR master index. Source 2 (Nasdaq Trader symbol directory): ETF flag,
+    which also catches grantor-trust ETFs (e.g. gold trusts) that file 10-K instead."""
+    import gzip
+    today = today or dt.date.today()
+    fund_ciks: set[int] = set()
+    y, q = today.year, (today.month - 1) // 3 + 1
+    for _ in range(5):
+        base = f"{SEC}/Archives/edgar/full-index/{y}/QTR{q}/master"
+        txt = None
+        try:
+            txt = gzip.decompress(http_bytes(base + ".gz", retries=2)).decode("latin-1")
+        except Exception:
+            try:
+                txt = http_bytes(base + ".idx", retries=2).decode("latin-1")
+            except Exception as e:
+                log.warning("EDGAR master index %d Q%d: %s", y, q, e)
+        if txt:
+            for line in txt.splitlines():
+                parts = line.split("|")
+                if len(parts) == 5 and parts[2] in FUND_FORMS and parts[0].isdigit():
+                    fund_ciks.add(int(parts[0]))
+        q -= 1
+        if q == 0:
+            y, q = y - 1, 4
+    uni = fetch_universe()
+    rows = []
+    if fund_ciks and not uni.empty:
+        hit = uni[uni["cik"].astype(int).isin(fund_ciks)]
+        rows += [dict(code=c, reason="SEC 基金申報") for c in hit["code"]]
+    try:
+        raw = http_bytes("https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt", retries=2).decode("latin-1")
+        df = pd.read_csv(io.StringIO(raw), sep="|", dtype=str)
+        log_fields = list(df.columns)
+        log.info("FIELDS nasdaqtraded: %s", log_fields)
+        etf = df[(df.get("ETF") == "Y")]["Symbol"].dropna().str.replace(".", "-", regex=False)
+        rows += [dict(code=c, reason="ETF") for c in etf]
+    except Exception as e:
+        log.warning("Nasdaq Trader symbol directory: %s", e)
+    if not rows:
+        return pd.DataFrame()
+    out = pd.DataFrame(rows).drop_duplicates("code")
+    out["date"] = pd.Timestamp(today)
+    log.info("funds: %d SEC fund CIKs -> %d excluded tickers", len(fund_ciks), len(out))
+    return out
+
+
+def fund_codes(store: Store) -> set:
+    f = store.load("funds")
+    if f.empty:
+        return set()
+    last = f["date"].max()
+    return set(f.loc[f["date"] == last, "code"])
 
 
 # ---------------------------------------------------------------- FINRA daily short volume
@@ -285,6 +351,12 @@ def _periodic_universe(store: Store, d: dt.date, lookback_days: int) -> None:
     if not sh.empty:
         sh["date"] = pd.Timestamp(d)
         store.append("shares", sh, keys=("date", "cik"))
+    have = store.dates("funds")
+    if not have or (d - max(have)).days >= 28:          # refresh the fund list monthly
+        try:
+            store.append("funds", fetch_funds(d))
+        except Exception:
+            log.exception("fund list failed")
 
 
 def _periodic_si(store: Store, d: dt.date, lookback_days: int) -> None:
@@ -391,7 +463,8 @@ def symbols(store: Store) -> dict[str, str]:
     if uni.empty:
         return {}
     u = uni.sort_values("date").drop_duplicates("code", keep="last")
-    return {c: c.replace(".", "-") for c in u["code"]}
+    funds = fund_codes(store)
+    return {c: c.replace(".", "-") for c in u["code"] if c not in funds}
 
 
 # ================================================================ factors
@@ -411,7 +484,10 @@ def build_factors(store: Store, since: str = "2014-01-01"):
 
     cal = pd.DatetimeIndex(sorted(pd.to_datetime(price["date"].unique())))
     u = uni.sort_values("date").drop_duplicates("code", keep="last").set_index("code")
-    codes = pd.Index(sorted(set(price["code"].unique()) & set(u.index)), name="code")
+    funds = fund_codes(store)          # closed-end funds / ETFs are not stocks: keep them out entirely
+    codes = pd.Index(sorted((set(price["code"].unique()) & set(u.index)) - funds), name="code")
+    if funds:
+        log.info("excluding %d fund/ETF tickers", len(funds & set(u.index)))
     W = lambda df, col, lim=0: wide(df, col, cal, codes, lim)
 
     px = W(price, "adj_close")
@@ -515,4 +591,5 @@ SOURCES = {
     "ftd": ("SEC 交割失敗資料", True),
     "inst13f": ("SEC Form 13F 資料集", True),
     "shares": ("SEC XBRL 流通股數", True),
+    "funds": ("SEC EDGAR 基金申報索引（排除封閉式基金、ETF）＋Nasdaq Trader ETF 標記", True),
 }
