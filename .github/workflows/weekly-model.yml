@@ -1,0 +1,42 @@
+name: weekly-model
+# Saturday: full walk-forward backtest (model quality shown on the dashboard) + rebuild.
+on:
+  schedule:
+    - cron: "0 2 * * 6"   # Sat 10:00 Taipei
+  workflow_dispatch:
+    inputs:
+      market: { description: "tw / us / jp / hk / cn", default: tw, required: true }
+permissions:
+  contents: write
+concurrency:
+  group: dist-publish
+  cancel-in-progress: false
+jobs:
+  run:
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        market: ${{ fromJSON(github.event.inputs.market && format('["{0}"]', github.event.inputs.market) || '["tw","us","jp","hk","cn"]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      # data (Release store + dist branch) lives in a PRIVATE repo; this public repo only has code
+      DATA_REPO: ${{ vars.DATA_REPO || 'esuper007/chip-radar' }}
+      DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
+      GH_TOKEN: ${{ secrets.DATA_TOKEN }}
+      GH_REPO: ${{ vars.DATA_REPO || 'esuper007/chip-radar' }}
+      MARKET: ${{ matrix.market }}
+      LOG_FILE: dist/_logs/${{ matrix.market }}-model.log
+    steps:
+      - name: Check secrets
+        run: '[ -n "$DATA_TOKEN" ] || { echo "::error::DATA_TOKEN secret is missing"; exit 1; }'
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: "${{ env.DATA_REPO }}", token: "${{ secrets.DATA_TOKEN }}", ref: dist, path: dist }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements.txt
+      - run: rm -f dist/_logs/$MARKET.log
+      - run: python -m pipeline.run build $MARKET --backtest --train || echo 'build failed (not enough data yet?)'
+      - run: bash scripts/publish_dist.sh

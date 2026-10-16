@@ -1,0 +1,51 @@
+name: backfill
+# Pull years of history in 5.5-hour chunks. Re-dispatches itself until `start` is reached.
+on:
+  workflow_dispatch:
+    inputs:
+      market: { description: "tw / us / jp / hk / cn", default: tw, required: true }
+      start:  { description: "earliest date YYYY-MM-DD", default: "2014-01-01", required: true }
+      end:    { description: "latest date (blank = today)", default: "", required: false }
+      chain:  { description: "auto re-run until finished (true/false)", default: "true", required: true }
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: backfill-${{ github.event.inputs.market }}
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      # data (Release store + dist branch) lives in a PRIVATE repo; this public repo only has code
+      DATA_REPO: ${{ vars.DATA_REPO || 'esuper007/chip-radar' }}
+      DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
+      GH_TOKEN: ${{ secrets.DATA_TOKEN }}
+      GH_REPO: ${{ vars.DATA_REPO || 'esuper007/chip-radar' }}
+      SEC_CONTACT: ${{ secrets.SEC_CONTACT }}
+    steps:
+      - name: Check secrets
+        run: '[ -n "$DATA_TOKEN" ] || { echo "::error::DATA_TOKEN secret is missing"; exit 1; }'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements.txt
+      - name: Backfill
+        id: bf
+        run: |
+          END="${{ github.event.inputs.end }}"
+          python -m pipeline.run backfill ${{ github.event.inputs.market }} \
+            --start ${{ github.event.inputs.start }} ${END:+--end $END} --max-minutes 320 2>&1 | tee bf.log
+          if grep -q "time budget reached" bf.log; then echo "more=true" >> $GITHUB_OUTPUT; fi
+      - name: Prices (full history)
+        if: steps.bf.outputs.more != 'true'
+        run: python -m pipeline.run prices ${{ github.event.inputs.market }} --years 13
+      - name: Continue in a new run
+        if: steps.bf.outputs.more == 'true' && github.event.inputs.chain == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run backfill.yml -f market=${{ github.event.inputs.market }} \
+            -f start=${{ github.event.inputs.start }} -f end="${{ github.event.inputs.end }}" -f chain=true

@@ -1,0 +1,46 @@
+name: all-markets
+# Run the daily update for every market one after another (used by the dashboard's full refresh).
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: dist-publish
+  cancel-in-progress: false
+jobs:
+  run:
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        market: [tw, jp, hk, cn, us]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      # data (Release store + dist branch) lives in a PRIVATE repo; this public repo only has code
+      DATA_REPO: ${{ vars.DATA_REPO || 'esuper007/chip-radar' }}
+      DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
+      GH_TOKEN: ${{ secrets.DATA_TOKEN }}
+      GH_REPO: ${{ vars.DATA_REPO || 'esuper007/chip-radar' }}
+      SEC_CONTACT: ${{ secrets.SEC_CONTACT }}
+      MARKET: ${{ matrix.market }}
+      LOG_FILE: dist/_logs/${{ matrix.market }}.log
+    steps:
+      - name: Check secrets
+        run: '[ -n "$DATA_TOKEN" ] || { echo "::error::DATA_TOKEN secret is missing"; exit 1; }'
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: "${{ env.DATA_REPO }}", token: "${{ secrets.DATA_TOKEN }}", ref: dist, path: dist }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements.txt
+      - run: rm -f dist/_logs/$MARKET.log
+      - name: Fetch today's chip data
+        run: python -m pipeline.run daily $MARKET
+      - name: Update prices
+        run: python -m pipeline.run prices $MARKET
+      - name: Build scores and forecasts
+        run: python -m pipeline.run build $MARKET
+      - name: Publish dist branch
+        run: bash scripts/publish_dist.sh
