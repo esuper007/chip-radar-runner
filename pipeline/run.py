@@ -28,7 +28,7 @@ CLOSE_LOCAL = {"tw": 14.0, "jp": 16.0, "hk": 16.75, "cn": 15.5, "us": 17.0}
 
 def last_complete_day(market: str, tz: int) -> dt.date:
     """The latest date whose session has closed in the market's local time."""
-    now = dt.datetime.utcnow() + dt.timedelta(hours=tz)
+    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(hours=tz)
     closed = now.hour + now.minute / 60 >= CLOSE_LOCAL.get(market, 17.0)
     return now.date() if closed else now.date() - dt.timedelta(days=1)
 
@@ -128,7 +128,13 @@ def cmd_build(a):
     except Exception:
         log.exception("signals failed")
         sig = None
-    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig)
+    from . import surge
+    try:
+        sg = surge.compute(fs, scores)
+    except Exception:
+        log.exception("surge similarity failed")
+        sg = None
+    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg)
     log.info("build done: %s", res)
 
 

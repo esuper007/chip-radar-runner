@@ -71,7 +71,8 @@ def _model_labels(fs: FactorSet) -> dict:
 
 
 def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics: dict,
-          freshness: dict, key_factors: list[str], quality: dict | None = None, sig: dict | None = None) -> dict:
+          freshness: dict, key_factors: list[str], quality: dict | None = None, sig: dict | None = None,
+          surge: dict | None = None) -> dict:
     out_dir = DIST / fs.market
     t = fs.calendar[-1]
     sc = {k: v.loc[t] for k, v in scores.items()}
@@ -96,6 +97,9 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
         row["sig"] = flags.get(c, [])
         if sig and c in sig.get("recent", {}):
             row["bs"] = sig["recent"][c]          # bottom-up signals: {key: trading days ago}
+        if surge and c in surge.get("today", {}):
+            row["sv"] = surge["today"][c]["sv"]    # similarity to past winners (percentile 0-100)
+            row["sm"] = surge["today"][c]["sm"]    # traits contributing most
         if c in fc.index:
             fr = fc.loc[c]
             row["fc"] = {}
@@ -149,6 +153,7 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
         "group_weights": fs.group_weights, "key_factors": key_factors, "series_names": ser_names,
         "shards": SHARDS, "quality": quality or {},
         "signals": (sig or {}).get("stats", {}),
+        "surge": {k: v for k, v in (surge or {}).items() if k != "today"},
     }
     _dump(out_dir / "summary.js", summary)
     return {"rows": len(rows), "asof": str(t.date())}

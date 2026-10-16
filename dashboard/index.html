@@ -121,7 +121,8 @@ table.grid{width:100%;border-collapse:collapse;font-size:13px}
 .factors td{padding:5px 4px;border-bottom:1px solid var(--line)}
 .factors td:last-child{text-align:right}
 .ai{white-space:pre-wrap;font-size:14px;line-height:1.7}
-.dq{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.dq{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:16px}
+.dq>div{min-width:0}
 .dq ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
 .dq li{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;font-size:13px}
 .dq li small{display:block;color:var(--muted);font-size:12px;line-height:1.45}
@@ -160,6 +161,13 @@ body.usconv .pill.ok{color:var(--up)}
 .bs.weak{opacity:.6}
 tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
 .pill.ok2{color:var(--up-c)}
+.sg-params{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13px}
+.sg-params b{font-family:var(--f-num)}
+.sv{font-family:var(--f-num);font-weight:600}
+.trait{font-size:11px;padding:1px 6px;border-radius:3px;background:var(--sunk);white-space:nowrap}
+.cf-fields{display:grid;gap:10px}
+.cf-fields label{display:grid;grid-template-columns:1fr 6em;gap:8px;align-items:center;font-size:13.5px}
+.cf-fields input{border:1px solid var(--line);background:var(--surface);border-radius:4px;padding:5px 8px;font-family:var(--f-num);text-align:right}
 .wl-form{display:flex;flex-wrap:wrap;gap:8px}
 .wl-form input{flex:1 1 220px;border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:6px 10px;min-width:0}
 .delta{font-family:var(--f-num)}
@@ -241,6 +249,21 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <p class="hint">每種訊號只在條件「第一天成立」時算一次。驗證方式：把歷史依時間分成前 70%（用來設定條件）與後 30%（樣本外，只用來檢驗，中間空出 63 個交易日避免重疊），統計樣本外每次觸發後 20、63 個交易日的表現。超額報酬是和同一天全市場（流動性足夠的股票）平均報酬相比，每天先去除前後 1% 的極端值；打敗大盤比例是報酬高於同一天中位數的比例（基準約 50%）。標示「有效」的條件：樣本外至少 50 次、20 日平均超額 ≥ 0.3%、打敗大盤比例 ≥ 51%、20 日上漲比例不低於基準，且 63 日平均超額為正。標示「資料累積中」的訊號，所需資料（例如集保大戶、主力資金）是從開始執行起才累積，還無法驗證。這些都是機率上的優勢，不保證個股會上漲。</p>
   </section>
 
+  <section class="panel" aria-label="飆股相似度">
+    <div class="sec-head"><h2>飆股相似度：籌碼最像歷年飆股起漲前的股票</h2>
+      <div class="sg-params"><span id="sgParams" class="muted"></span><button class="btn" id="sgEdit">修改參數</button></div></div>
+    <p class="hint" id="sgStatus" style="margin:0 0 10px"></p>
+    <div class="scroll"><table class="grid"><thead><tr>
+      <th class="l">代號</th><th class="l">名稱</th><th>收盤</th><th>籌碼分數</th><th title="今天在全市場（流動性足夠）的相似度百分位，100 最像">相似度</th><th class="l">最相似的籌碼特徵</th><th title="加權綜合（依你設定的權重）">1季上漲</th><th></th>
+    </tr></thead><tbody id="sgRows"></tbody></table></div>
+    <div class="pager"><span id="sgInfo" class="muted"></span><button class="btn" id="sgMore">顯示更多</button></div>
+    <div class="dq" style="margin-top:12px">
+      <div><h2>歷史驗證（逐年往前，不使用未來資料）</h2><div class="scroll" id="sgVal"></div></div>
+      <div><h2>歷年飆股起漲前最與眾不同的籌碼特徵</h2><div id="sgTraits" class="scroll"></div></div>
+    </div>
+    <p class="hint">做法：每年漲幅前 N% 的股票（流動性足夠者）為「飆股」，以它起漲前的最低點為基準，取低點前 A 個交易日到低點後 B 個交易日的籌碼（各子分數與評分因子的全市場百分位，取低點前、低點後的平均及兩者差）。和同期所有股票比較，找出飆股明顯不同的特徵並依差異大小加權，再計算每檔股票最近 A+B 個交易日的籌碼和這個樣貌的相似度。股價本身不列入比對，避免變成單純追漲。驗證時只用前幾年的飆股建立樣貌，檢查之後每月相似度前 50 名在接下來一年成為前 N% 的比例，和隨機的 N% 比較；提升倍數 ≥ 1.3 且一年超額報酬為正才標示「有效」。</p>
+  </section>
+
   <section class="pulse" id="pulse" aria-label="市場籌碼概況"></section>
 
   <section class="panel" aria-label="預測模型可信度">
@@ -293,6 +316,19 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
   </div>
 </div>
 
+<div class="confirm" id="sgDlg" hidden>
+  <div class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="sgDlgTitle">
+    <h3 id="sgDlgTitle">修改「起漲前」的定義</h3>
+    <div class="cf-fields">
+      <label>起漲前最低點「往前」幾個交易日 <input type="number" id="sgPre" min="10" max="250" step="1" inputmode="numeric"></label>
+      <label>起漲前最低點「往後」幾個交易日 <input type="number" id="sgPost" min="0" max="120" step="1" inputmode="numeric"></label>
+      <label>飆股標準：每年漲幅前幾 % <input type="number" id="sgTop" min="1" max="30" step="1" inputmode="numeric"></label>
+    </div>
+    <p class="note" id="sgDlgNote" style="margin:0">送出後五個市場會用新定義重新計算並驗證，約需 1 小時，完成後自動同步。範圍：往前 10–250、往後 0–120、前 1–30%。</p>
+    <div class="confirm-actions"><button class="btn" id="sgCancel">取消</button><button class="btn" id="sgReset">恢復 89／34／10%</button><button class="btn primary" id="sgOk">確定執行</button></div>
+  </div>
+</div>
+
 <div class="drawer" id="drawer" hidden>
   <article class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="dTitle"></article>
 </div>
@@ -304,7 +340,7 @@ const GROUPS = {inst:"法人",holders:"大戶散戶",margin:"信用",short:"放�
 const HZ = [["1q","1季"],["6m","半年"],["1y","1年"]];
 const PAGE = 50;
 // Scheduled tasks that refresh this page (filled in when the tasks are created).
-const TRIGGERS = {sync: "trig_01SnDHGdxti2geoHgdwzu1Uf", full: "trig_01SnDHGdxti2geoHgdwzu1Uf"};
+const TRIGGERS = {sync: "trig_01SnDHGdxti2geoHgdwzu1Uf", full: "trig_01SnDHGdxti2geoHgdwzu1Uf", surge: "trig_01LETQr6EE8JkxsSbQaJB9tq"};
 const S = {market:"tw", summary:{}, screen:{}, series:{}, page:0, mcp:null, sample:null};
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -340,13 +376,13 @@ async function loadMarket(){
     renderSummary();
     if (!S.screen[m]) S.screen[m] = await getJSON(dataUrl("screen"));
     if (m !== S.market) return;
-    buildFilters(); renderRows(); renderRank(); renderSignals(); renderWatch();
+    buildFilters(); renderRows(); renderRank(); renderSignals(); renderSurge(); renderWatch();
   }catch(e){
     if (m !== S.market) return;
     if (!(e && e.status)) console.error("render failed", e);
     $("asof").textContent = "尚無資料";
     $("pinfo").textContent = ""; $("prev").disabled = $("next").disabled = true;
-    $("dq").innerHTML = ""; $("rank").innerHTML = ""; $("rkDual").innerHTML = ""; $("bsRows").innerHTML = ""; $("bsStats").innerHTML = ""; renderWatch();
+    $("dq").innerHTML = ""; $("rank").innerHTML = ""; $("rkDual").innerHTML = ""; $("bsRows").innerHTML = ""; $("bsStats").innerHTML = ""; $("sgRows").innerHTML = ""; renderWatch();
     $("rows").innerHTML = `<tr><td colspan="10" class="empty"><strong>${MARKETS.find(x=>x[0]===m)[1]}的資料還在準備中</strong>第一次計算完成並同步後就會出現在這裡。</td></tr>`;
   }
 }
@@ -722,6 +758,65 @@ $("bsRows").addEventListener("click", async e => {
 });
 $("bsRows").addEventListener("keydown", e => { const tr = e.target.closest("tr[data-c]"); if (tr && e.target === tr && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openStock(tr.dataset.c); }});
 
+// ---------- surge similarity ----------
+const SG = {shown: 50};
+$("sgMore").onclick = () => { SG.shown += 50; renderSurge(); };
+function renderSurge(){
+  const sc = S.screen[S.market], sg = S.summary[S.market]?.surge || {}, tb = $("sgRows"), p = sg.params || {pre: 89, post: 34, top_pct: 10};
+  $("sgParams").innerHTML = `起漲前定義：低點往前 <b>${p.pre}</b> 日、往後 <b>${p.post}</b> 日｜飆股：年漲幅前 <b>${p.top_pct}%</b>`;
+  const v = sg.validation || {};
+  $("sgStatus").innerHTML = sg.status === "ok"
+    ? `以 ${esc(sg.years?.[0])}–${esc(sg.years?.[1])} 年共 ${fmt(sg.n_winners,0)} 檔次飆股建立樣貌。驗證：<span class="pill ${sg.valid ? "ok2" : "ng"}">${sg.valid ? "有效" : "未通過"}</span> 相似度前 50 名成為飆股的比例 ${v.precision != null ? pct(v.precision) : "—"}，隨機為 ${pct(v.base)}（提升 ${v.lift != null ? fmt(v.lift,2) + " 倍" : "—"}）。`
+    : sg.status === "insufficient" ? `這個市場的籌碼歷史還不夠長，飆股樣本只有 ${fmt(sg.n_winners,0)} 檔次，暫時無法建立樣貌。` : `尚未計算，下次資料更新後出現。`;
+  renderSurgeVal(sg);
+  if (!sc){ tb.innerHTML = ""; return; }
+  const list = sc.rows.filter(r => r.sv != null).sort((a,b) => b.sv - a.sv);
+  $("sgInfo").textContent = list.length ? `共 ${list.length} 檔有相似度` : "";
+  $("sgMore").hidden = list.length <= SG.shown;
+  if (!list.length){ tb.innerHTML = `<tr><td colspan="8" class="empty"><strong>目前沒有相似度資料</strong>${sg.status === "insufficient" ? "籌碼歷史累積足夠後就會出現。" : "下次資料更新後出現。"}</td></tr>`; return; }
+  tb.innerHTML = list.slice(0, SG.shown).map(r => { const pu = pUp(r,"1q","avg");
+    return `<tr data-c="${esc(r.c)}" tabindex="0"><td class="l num">${esc(r.c)}</td><td class="l">${esc(r.n)}</td><td class="num">${fmt(r.px,2)}</td>
+    <td><span class="score"><span class="meter"><i style="width:${r.sc}%"></i></span><b>${fmt(r.sc,1)}</b></span></td>
+    <td><span class="sv">${fmt(r.sv,1)}</span></td>
+    <td class="l wrapc">${(r.sm||[]).map(t => `<span class="trait">${esc(t)}</span>`).join(" ")}</td>
+    <td><span class="pp ${pu==null?"muted":pu>=0.6?"up":pu<=0.4?"down":""}">${pu==null?"累積中":pct(pu)}</span></td>
+    <td><button class="star ${wlHas(r.c)?"on":""}" data-star="${esc(r.c)}" aria-label="${wlHas(r.c)?"移出":"加入"}觀察清單：${esc(r.n)}">${wlHas(r.c)?"★":"☆"}</button></td></tr>`; }).join("");
+}
+function renderSurgeVal(sg){
+  const v = sg.validation || {};
+  $("sgVal").innerHTML = (v.per_year || []).length ? `<table class="mq"><thead><tr><th>測試年度</th><th>月份數</th><th>前 50 名成為飆股比例</th><th>隨機基準</th></tr></thead><tbody>
+    ${v.per_year.map(y => `<tr><td>${y.year}</td><td class="num">${y.dates}</td><td class="num">${pct(y.precision)}</td><td class="num muted">${pct(v.base)}</td></tr>`).join("")}
+    <tr><td><b>合計</b></td><td class="num">${v.dates}</td><td class="num"><b>${pct(v.precision)}</b></td><td class="num muted">${pct(v.base)}</td></tr></tbody></table>
+    <p class="hint" style="margin-top:6px">相似度前 50 名之後一季平均超額報酬 ${v.excess_63 != null ? (v.excess_63 > 0 ? "+" : "") + fmt(v.excess_63,2) + "%" : "—"}，一年 ${v.excess_252 != null ? (v.excess_252 > 0 ? "+" : "") + fmt(v.excess_252,2) + "%" : "—"}（相對同日全市場平均）。</p>`
+    : `<span class="muted">尚無驗證結果。</span>`;
+  $("sgTraits").innerHTML = (sg.traits || []).length ? `<table class="mq"><thead><tr><th>特徵</th><th>和一般股票的差異（標準差）</th></tr></thead><tbody>
+    ${sg.traits.map(t => `<tr><td>${esc(t.name)}</td><td class="num ${tone(t.d)}">${t.d > 0 ? "+" : ""}${fmt(t.d,2)}</td></tr>`).join("")}</tbody></table>
+    <p class="hint" style="margin-top:6px">正值代表飆股起漲前這項指標的全市場排名明顯偏高，負值代表偏低。</p>` : `<span class="muted">—</span>`;
+}
+$("sgRows").addEventListener("click", async e => {
+  const st = e.target.closest("[data-star]"); if (st){ e.stopPropagation(); await wlToggle(st.dataset.star); return; }
+  const tr = e.target.closest("tr[data-c]"); if (tr) openStock(tr.dataset.c);
+});
+$("sgRows").addEventListener("keydown", e => { const tr = e.target.closest("tr[data-c]"); if (tr && e.target === tr && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openStock(tr.dataset.c); }});
+let sgReturn = null;
+function openSgDlg(){
+  const p = S.summary[S.market]?.surge?.params || {pre: 89, post: 34, top_pct: 10};
+  $("sgPre").value = p.pre; $("sgPost").value = p.post; $("sgTop").value = p.top_pct;
+  sgReturn = document.activeElement; $("sgDlg").hidden = false; $("sgPre").focus();
+}
+function closeSgDlg(){ $("sgDlg").hidden = true; sgReturn?.focus?.(); }
+$("sgEdit").onclick = openSgDlg;
+$("sgCancel").onclick = closeSgDlg;
+$("sgReset").onclick = () => { $("sgPre").value = 89; $("sgPost").value = 34; $("sgTop").value = 10; };
+$("sgDlg").addEventListener("click", e => { if (e.target === $("sgDlg")) closeSgDlg(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("sgDlg").hidden) closeSgDlg(); });
+$("sgOk").onclick = () => {
+  const pre = Math.round(Number($("sgPre").value)), post = Math.round(Number($("sgPost").value)), top = Math.round(Number($("sgTop").value));
+  if (!(pre >= 10 && pre <= 250 && post >= 0 && post <= 120 && top >= 1 && top <= 30)){
+    $("sgDlgNote").textContent = "數值超出範圍：往前 10–250、往後 0–120、前 1–30%。"; return; }
+  closeSgDlg(); fire("surge", `surge pre=${pre} post=${post} top=${top}`);
+};
+
 // ---------- watchlist (saved to the viewer's account via db; this browser as fallback) ----------
 const WL = {items: [], ref: null, chain: Promise.resolve()};
 const CODE_OK = /^[0-9A-Za-z.\-]{1,12}$/;
@@ -822,15 +917,20 @@ async function wlConnect(){
 }
 
 // ---------- refresh buttons (Claude Code Remote → scheduled tasks) ----------
-async function fire(kind){
+async function fire(kind, text){
   const id = TRIGGERS[kind];
   if (!id || id.startsWith("__")){ msg("尚未設定自動更新工作。"); return; }
   if (!S.mcp){ msg("這個檢視無法觸發更新；請在 claude.ai 中開啟此頁面。"); return; }
-  const b = kind === "sync" ? $("btnSync") : $("btnFull"); b.disabled = true;
-  msg(kind === "sync" ? "已送出同步要求…" : "已送出重新抓取要求…");
+  const b = kind === "sync" ? $("btnSync") : kind === "full" ? $("btnFull") : $("sgEdit"); b.disabled = true;
+  msg(kind === "sync" ? "已送出同步要求…" : kind === "full" ? "已送出重新抓取要求…" : "已送出參數變更…");
   try{
-    await S.mcp.callTool("Claude Code Remote", "fire_trigger", kind === "full" ? {trigger_id: id, text: "full refresh"} : {trigger_id: id});
-    msg(kind === "sync" ? "同步工作已啟動，約 5–10 分鐘後重新整理頁面即可看到最新結果。" : "重新抓取已啟動：五個市場會同時在 GitHub 重新抓資料與計算（約 40–60 分鐘，美股、陸股最久），完成後自動同步到這裡，再重新整理頁面即可。");
+    const args = {trigger_id: id};
+    if (kind === "full") args.text = "full refresh";
+    if (kind === "surge") args.text = text;
+    await S.mcp.callTool("Claude Code Remote", "fire_trigger", args);
+    msg(kind === "sync" ? "同步工作已啟動，約 5–10 分鐘後重新整理頁面即可看到最新結果。" :
+        kind === "full" ? "重新抓取已啟動：五個市場會同時在 GitHub 重新抓資料與計算（約 40–60 分鐘，美股、陸股最久），完成後自動同步到這裡，再重新整理頁面即可。" :
+        "參數變更已送出：五個市場會用新的「起漲前」定義重算（約 1 小時），完成後自動同步，再重新整理頁面即可。");
   }catch(e){
     const c = e?.code;
     msg(c === "server_not_connected" ? "請先在 claude.ai「設定 → Connectors」連接 Claude Code Remote。" :
