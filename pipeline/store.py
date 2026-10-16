@@ -73,12 +73,28 @@ class Store:
                         log.warning("merge with remote %s failed: %s", p.name, e)
         files = [str(p) for p in sorted(self.dirty)]
         for i in range(0, len(files), 20):
-            _gh("release", "upload", self.tag, *files[i:i + 20], "--clobber")
+            self._upload(files[i:i + 20])
         log.info("pushed %d files to %s", len(files), self.tag)
         self.dirty.clear()
         self.new_rows.clear()
         self.replaced.clear()
         self._cache.clear()
+
+    def _upload(self, files: list[str]) -> None:
+        """Upload with retries: a backfill running at the same time may be replacing the same asset
+        (gh deletes and re-creates it), which makes a single attempt fail now and then."""
+        import time
+        for attempt in range(5):
+            r = _gh("release", "upload", self.tag, *files, "--clobber", check=False)
+            if r.returncode == 0:
+                return
+            log.warning("upload to %s failed (attempt %d): %s", self.tag, attempt + 1, (r.stderr or "").strip()[:300])
+            time.sleep(10 * (attempt + 1))
+            if len(files) > 1:                       # retry one by one so one bad file cannot block the rest
+                for f in files:
+                    self._upload([f])
+                return
+        raise RuntimeError(f"could not upload {files} to {self.tag}")
 
     # ---------- read / write ----------
     def _path(self, dataset: str, year: int) -> Path:

@@ -55,4 +55,5 @@ jobs:
       - name: Build scores and forecasts
         run: python -m pipeline.run build $MARKET
       - name: Publish dist branch
+        if: always()          # on failure this still publishes the log, so problems can be diagnosed
         run: bash scripts/publish_dist.sh
