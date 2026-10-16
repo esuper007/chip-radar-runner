@@ -109,7 +109,11 @@ def _fit(Xw: np.ndarray, Xa: np.ndarray):
     mu, sd = np.nanmean(Xa, axis=0), np.nanstd(Xa, axis=0)
     sd = np.where(sd > 1e-6, sd, np.nan)
     d = (np.nanmean(Xw, axis=0) - mu) / sd
-    w = np.where(np.abs(d) >= MIN_D, d, 0.0)
+    # A feature only counts if most winners AND most reference stock-dates have it: data that
+    # exists only for recent years (e.g. CN main-force flow) would otherwise compare recent
+    # winners against a different era and produce a spurious difference.
+    cov = np.minimum((~np.isnan(Xw)).mean(axis=0), (~np.isnan(Xa)).mean(axis=0))
+    w = np.where((np.abs(d) >= MIN_D) & (cov >= 0.5), d, 0.0)
     w = np.nan_to_num(w)
     return mu, sd, w
 
