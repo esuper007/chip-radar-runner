@@ -174,7 +174,7 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <div class="actions">
       <span class="status" id="asof">資料載入中…</span>
       <button class="btn" id="btnSync" title="把 GitHub 上最新算好的結果同步到這個頁面">同步最新結果</button>
-      <button class="btn primary" id="btnFull" title="重新抓取今天的籌碼資料並重算分數與預測，約需 20–60 分鐘">重新抓取資料</button>
+      <button class="btn primary" id="btnFull" title="五個市場同時重新抓取最新籌碼資料並重算分數、訊號與預測，完成後自動同步，約需 45–70 分鐘">重新抓取資料</button>
       <button class="btn" id="btnConv" title="切換漲跌顏色慣例">紅漲綠跌</button>
     </div>
   </header>
@@ -816,7 +816,7 @@ async function fire(kind){
   msg(kind === "sync" ? "已送出同步要求…" : "已送出重新抓取要求…");
   try{
     await S.mcp.callTool("Claude Code Remote", "fire_trigger", kind === "full" ? {trigger_id: id, text: "full refresh"} : {trigger_id: id});
-    msg(kind === "sync" ? "同步工作已啟動，約 5–10 分鐘後重新整理頁面即可看到最新結果。" : "重新抓取已啟動：五個市場會依序在 GitHub 重新抓資料與計算（約 1–3 小時），完成後自動同步到這裡。");
+    msg(kind === "sync" ? "同步工作已啟動，約 5–10 分鐘後重新整理頁面即可看到最新結果。" : "重新抓取已啟動：五個市場會同時在 GitHub 重新抓資料與計算（約 40–60 分鐘，美股、陸股最久），完成後自動同步到這裡，再重新整理頁面即可。");
   }catch(e){
     const c = e?.code;
     msg(c === "server_not_connected" ? "請先在 claude.ai「設定 → Connectors」連接 Claude Code Remote。" :
