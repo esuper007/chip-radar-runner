@@ -5,17 +5,17 @@ on:
 permissions:
   contents: write
   actions: write
-concurrency:
-  group: dist-publish
-  cancel-in-progress: false
 jobs:
   run:
     strategy:
-      max-parallel: 1
+      max-parallel: 5
       fail-fast: false
       matrix:
         market: [tw, jp, hk, cn, us]
     runs-on: ubuntu-latest
+    concurrency:
+      group: market-${{ matrix.market }}
+      cancel-in-progress: false
     timeout-minutes: 180
     env:
       # data (Release store + dist branch) lives in a PRIVATE repo; this public repo only has code

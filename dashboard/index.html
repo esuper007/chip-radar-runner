@@ -149,6 +149,11 @@ body.usconv .pill.ok{color:var(--up)}
 .hl-up .rk,.hl-up .nm{color:var(--up-c);font-weight:700} .hl-dn .rk,.hl-dn .nm{color:var(--down-c);font-weight:700}
 #rkDual:empty{display:none}
 #rkDual{margin:0 0 10px;font-size:13px}
+.bs{font-size:11px;padding:1px 6px;border-radius:3px;background:var(--accent-soft);color:var(--ink);white-space:nowrap}
+.bs.ok{box-shadow:inset 2px 0 0 var(--up-c)} .bs small{color:var(--muted);margin-left:3px}
+.bs.weak{opacity:.6}
+tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
+.pill.ok2{color:var(--up-c)}
 .wl-form{display:flex;flex-wrap:wrap;gap:8px}
 .wl-form input{flex:1 1 220px;border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:6px 10px;min-width:0}
 .delta{font-family:var(--f-num)}
@@ -212,6 +217,22 @@ body.usconv .pill.ok{color:var(--up)}
     <p id="rkDual"></p>
     <div class="rank4" id="rank"></div>
     <p class="hint">上漲機率是模型估計的「期間結束時股價高於現在」的機率，下跌機率＝1－上漲機率；漲跌幅是含息報酬的中位數預估。「加權綜合」預設以樣本內外模型為主（70%），機器學習與歷史相似各占 15%，可在上方自行調整；合計不是 100% 時按比例換算，某方法沒有數值時，權重按其餘方法重新分配。<b>醒目標示</b>：同時進入「上漲機率」與「預估漲幅」前 20 名的以紅底標示（雙榜看漲），同時進入「下跌機率」與「預估跌幅」前 20 名的以綠底標示（雙榜看跌），顏色隨漲跌慣例切換；完整名單列在排行上方。排行只代表模型的相對看法，可信度請對照下方的回測成績。點一列看詳細籌碼，按 ☆ 加入觀察清單。</p>
+  </section>
+
+  <section class="panel" aria-label="起漲訊號">
+    <div class="sec-head"><h2>籌碼轉好・起漲訊號（近 5 個交易日）</h2>
+      <div class="toolbar">
+        <label><input type="checkbox" id="bsValid" checked> 只看回測有效的訊號</label>
+        <select id="bsP" aria-label="上漲機率門檻"><option value="0">上漲機率不限</option><option value="0.5">加權 1 季上漲機率 ≥ 50%</option><option value="0.55">≥ 55%</option><option value="0.6">≥ 60%</option></select>
+        <select id="bsK" aria-label="訊號種類"><option value="">全部訊號</option></select>
+      </div></div>
+    <div class="scroll"><table class="grid"><thead><tr>
+      <th class="l">代號</th><th class="l">名稱</th><th>收盤</th><th>籌碼分數</th><th class="l">觸發的訊號</th><th title="加權綜合（依你設定的權重）">1季上漲</th><th></th>
+    </tr></thead><tbody id="bsRows"></tbody></table></div>
+    <div class="pager"><span id="bsInfo" class="muted"></span><button class="btn" id="bsMore">顯示更多</button></div>
+    <h2 style="margin-top:14px">各訊號的歷史驗證（樣本外）</h2>
+    <div class="scroll" id="bsStats"></div>
+    <p class="hint">每種訊號只在條件「第一天成立」時算一次。驗證方式：把歷史依時間分成前 70%（用來設定條件）與後 30%（樣本外，只用來檢驗，中間空出 63 個交易日避免重疊），統計樣本外每次觸發後 20、63 個交易日的表現。超額報酬是和同一天全市場（流動性足夠）報酬中位數相比；打敗大盤比例是超額報酬為正的比例。標示「有效」的條件：樣本外至少 50 次、20 日平均超額 ≥ 0.3%、打敗大盤比例 ≥ 51%，且 63 日平均超額為正。這些都是機率上的優勢，不保證個股會上漲。</p>
   </section>
 
   <section class="pulse" id="pulse" aria-label="市場籌碼概況"></section>
@@ -305,13 +326,13 @@ async function loadMarket(){
     renderSummary();
     if (!S.screen[m]) S.screen[m] = await getJSON(dataUrl("screen"));
     if (m !== S.market) return;
-    buildFilters(); renderRows(); renderRank(); renderWatch();
+    buildFilters(); renderRows(); renderRank(); renderSignals(); renderWatch();
   }catch(e){
     if (m !== S.market) return;
     if (!(e && e.status)) console.error("render failed", e);
     $("asof").textContent = "尚無資料";
     $("pinfo").textContent = ""; $("prev").disabled = $("next").disabled = true;
-    $("dq").innerHTML = ""; $("rank").innerHTML = ""; $("rkDual").innerHTML = ""; renderWatch();
+    $("dq").innerHTML = ""; $("rank").innerHTML = ""; $("rkDual").innerHTML = ""; $("bsRows").innerHTML = ""; $("bsStats").innerHTML = ""; renderWatch();
     $("rows").innerHTML = `<tr><td colspan="10" class="empty"><strong>${MARKETS.find(x=>x[0]===m)[1]}的資料還在準備中</strong>第一次計算完成並同步後就會出現在這裡。</td></tr>`;
   }
 }
@@ -577,7 +598,7 @@ function readW(){
 }
 Object.values(W_IN).forEach(id => $(id).addEventListener("change", () => {
   const zero = !Object.values(W_IN).some(i => Number($(i).value) > 0);
-  RANK_W = readW(); showW(); if (zero) $("wSum").textContent = "權重不能全部為 0，已恢復預設 70／15／15。"; renderRank(); saveW(); }));
+  RANK_W = readW(); showW(); renderSignals(); if (zero) $("wSum").textContent = "權重不能全部為 0，已恢復預設 70／15／15。"; renderRank(); saveW(); }));
 $("wReset").onclick = () => { RANK_W = {...W_DEF}; showW(); renderRank(); saveW(); };
 async function prefsConnect(db, uid){
   const ref = db.doc("data/users/" + uid + "/prefs");
@@ -635,6 +656,58 @@ $("rank").addEventListener("click", async e => {
 });
 $("rank").addEventListener("keydown", e => { const li = e.target.closest("li[data-c]"); if (li && e.target === li && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openStock(li.dataset.c); }});
 
+// ---------- bottom-up signals ----------
+const BS = {shown: 50};
+const ago = d => d === 0 ? "今天" : `${d}天前`;
+function sigDefs(){ return S.summary[S.market]?.signals || {}; }
+function bsChips(r, onlyValid){
+  const defs = sigDefs();
+  return Object.entries(r.bs || {}).filter(([k]) => defs[k] && (!onlyValid || defs[k].valid)).sort((a,b) => a[1]-b[1])
+    .map(([k,d]) => `<span class="bs ${defs[k].valid ? "ok" : "weak"}" title="${esc(defs[k].desc)}${defs[k].valid ? "" : "（樣本外驗證未通過）"}">${esc(defs[k].name)}<small>${ago(d)}</small></span>`).join(" ");
+}
+["bsValid","bsP","bsK"].forEach(id => $(id).addEventListener("change", () => { BS.shown = 50; renderSignals(); }));
+$("bsMore").onclick = () => { BS.shown += 50; renderSignals(); };
+function renderSignals(){
+  const sc = S.screen[S.market], defs = sigDefs(), tb = $("bsRows");
+  const keys = Object.keys(defs);
+  const cur = $("bsK").value;
+  $("bsK").innerHTML = `<option value="">全部訊號</option>` + keys.map(k => `<option value="${k}" ${k===cur?"selected":""}>${esc(defs[k].name)}${defs[k].valid?"":"（未通過）"}</option>`).join("");
+  renderSigStats(defs);
+  if (!sc){ tb.innerHTML = ""; return; }
+  if (!keys.length){ tb.innerHTML = `<tr><td colspan="7" class="empty"><strong>訊號將在下次資料更新後出現</strong>每個市場收盤後的例行更新會計算訊號與歷史驗證。</td></tr>`; $("bsInfo").textContent = ""; $("bsMore").hidden = true; return; }
+  const onlyValid = $("bsValid").checked, pmin = Number($("bsP").value), k1 = $("bsK").value;
+  const list = sc.rows.map(r => {
+    const ks = Object.entries(r.bs || {}).filter(([k]) => defs[k] && (!onlyValid || defs[k].valid) && (!k1 || k === k1));
+    return {r, ks, p: pUp(r,"1q","avg"), last: ks.length ? Math.min(...ks.map(x => x[1])) : 99};
+  }).filter(x => x.ks.length && (!pmin || (x.p != null && x.p >= pmin)))
+    .sort((a,b) => b.ks.length - a.ks.length || a.last - b.last || (b.p ?? 0) - (a.p ?? 0));
+  $("bsInfo").textContent = `${list.length} 檔`;
+  $("bsMore").hidden = list.length <= BS.shown;
+  if (!list.length){ tb.innerHTML = `<tr><td colspan="7" class="empty"><strong>近 5 個交易日沒有符合條件的股票</strong>可以取消「只看回測有效的訊號」或放寬上漲機率門檻。</td></tr>`; return; }
+  tb.innerHTML = list.slice(0, BS.shown).map(({r, p}) => `<tr data-c="${esc(r.c)}" tabindex="0"><td class="l num">${esc(r.c)}</td><td class="l">${esc(r.n)}</td><td class="num">${fmt(r.px,2)}</td>
+    <td><span class="score"><span class="meter"><i style="width:${r.sc}%"></i></span><b>${fmt(r.sc,1)}</b></span></td>
+    <td class="l wrapc">${bsChips(r, onlyValid)}</td>
+    <td><span class="pp ${p==null?"muted":p>=0.6?"up":p<=0.4?"down":""}">${p==null?"累積中":pct(p)}</span></td>
+    <td><button class="star ${wlHas(r.c)?"on":""}" data-star="${esc(r.c)}" aria-label="${wlHas(r.c)?"移出":"加入"}觀察清單：${esc(r.n)}">${wlHas(r.c)?"★":"☆"}</button></td></tr>`).join("");
+}
+function renderSigStats(defs){
+  const el = $("bsStats"), keys = Object.keys(defs);
+  if (!keys.length){ el.innerHTML = `<span class="muted">尚未計算。</span>`; return; }
+  const b = defs[keys[0]].base || {}, sp = defs[keys[0]].split || {};
+  const pc = v => v == null ? "—" : pct(v), ex = v => v == null ? "—" : `<span class="${tone(v)}">${v>0?"+":""}${fmt(v,2)}%</span>`;
+  el.innerHTML = `<table class="mq"><thead><tr><th>訊號</th><th>狀態</th><th>樣本外次數</th><th>20日上漲比例</th><th>20日平均超額</th><th>20日打敗大盤</th><th>63日上漲比例</th><th>63日平均超額</th></tr></thead><tbody>
+    <tr><td class="muted">基準（所有股票、所有日子）</td><td></td><td class="num muted">${fmt(b["20"]?.n,0)}</td><td class="num muted">${pc(b["20"]?.hit)}</td><td class="num muted">0%</td><td class="num muted">50%</td><td class="num muted">${pc(b["63"]?.hit)}</td><td class="num muted">0%</td></tr>
+    ${keys.map(k => { const d = defs[k], o = d.oos || {};
+      return `<tr title="${esc(d.desc)}"><td>${esc(d.name)}</td><td><span class="pill ${d.valid?"ok2":"ng"}">${d.valid?"有效":"未通過"}</span></td><td class="num">${fmt(o["20"]?.n,0)}</td>
+        <td class="num">${pc(o["20"]?.hit)}</td><td class="num">${ex(o["20"]?.excess)}</td><td class="num">${pc(o["20"]?.beat)}</td><td class="num">${pc(o["63"]?.hit)}</td><td class="num">${ex(o["63"]?.excess)}</td></tr>`; }).join("")}
+  </tbody></table><p class="hint" style="margin-top:6px">樣本內 ${esc(sp.is||"")}，樣本外 ${esc(sp.oos||"")}。滑鼠移到訊號名稱可看條件。</p>`;
+}
+$("bsRows").addEventListener("click", async e => {
+  const st = e.target.closest("[data-star]"); if (st){ e.stopPropagation(); await wlToggle(st.dataset.star); return; }
+  const tr = e.target.closest("tr[data-c]"); if (tr) openStock(tr.dataset.c);
+});
+$("bsRows").addEventListener("keydown", e => { const tr = e.target.closest("tr[data-c]"); if (tr && e.target === tr && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openStock(tr.dataset.c); }});
+
 // ---------- watchlist (saved to the viewer's account via db; this browser as fallback) ----------
 const WL = {items: [], ref: null, chain: Promise.resolve()};
 const CODE_OK = /^[0-9A-Za-z.\-]{1,12}$/;
@@ -690,13 +763,14 @@ async function renderWatch(){
   tb.innerHTML = mine.map(({c}) => { const r = byC.get(c);
     if (!r) return `<tr><td class="l num">${esc(c)}</td><td class="l muted" colspan="10">今天的資料中沒有這檔（可能停牌、下市或代號有誤）</td><td><button class="star on" data-unwatch="${esc(c)}" aria-label="移除 ${esc(c)}">★</button></td></tr>`;
     const v = avgP(r,"1q"), subs = Object.keys(GROUPS).filter(g => g in (r.sub||{})).map(g => `<i title="${GROUPS[g]} ${fmt(r.sub[g],0)}" style="height:${Math.max(2,(r.sub[g]||0)*0.18)}px"></i>`).join("");
-    return `<tr data-c="${esc(r.c)}" tabindex="0"><td class="l num">${esc(r.c)}</td><td class="l">${esc(r.n)}</td><td class="num">${fmt(r.px,2)}</td>
+    const hit = Object.keys(r.bs || {}).some(k => sigDefs()[k]?.valid);
+    return `<tr data-c="${esc(r.c)}" tabindex="0" class="${hit ? "bs-hit" : ""}"${hit ? ` title="近 5 個交易日出現回測有效的起漲訊號"` : ""}><td class="l num">${esc(r.c)}</td><td class="l">${esc(r.n)}</td><td class="num">${fmt(r.px,2)}</td>
       <td><span class="score"><span class="meter"><i style="width:${r.sc}%"></i></span><b>${fmt(r.sc,1)}</b></span></td>
       <td class="delta" data-d1="${esc(r.c)}">${r.liq ? "…" : "—"}</td><td class="delta" data-d5="${esc(r.c)}">${r.liq ? "…" : "—"}</td><td class="delta" data-d20="${esc(r.c)}">${r.liq ? "…" : "—"}</td>
       <td class="hide-sm" data-sp="${esc(r.c)}">${r.liq ? "" : `<span class="muted" title="流動性不足的股票不提供歷史序列">—</span>`}</td>
       <td class="hide-sm"><span class="subs">${subs}</span></td>
       <td><span class="pp ${v==null?"muted":v>=0.6?"up":v<=0.4?"down":""}">${v==null?"累積中":pct(v)}</span></td>
-      <td class="l wrapc"><span class="sigs" style="flex-wrap:wrap">${(r.sig||[]).map(t=>`<span class="sig ${isPos(t)?"pos":"neg"}">${esc(t)}</span>`).join("") || `<span class="muted">無特別訊號</span>`}</span></td>
+      <td class="l wrapc"><span class="sigs" style="flex-wrap:wrap">${bsChips(r, false)}${(r.sig||[]).map(t=>`<span class="sig ${isPos(t)?"pos":"neg"}">${esc(t)}</span>`).join("") || (r.bs ? "" : `<span class="muted">無特別訊號</span>`)}</span></td>
       <td><button class="star on" data-unwatch="${esc(r.c)}" aria-label="移除 ${esc(r.n)}">★</button></td></tr>`; }).join("");
   // score changes from the daily series (liquid stocks only)
   for (const {c} of mine){

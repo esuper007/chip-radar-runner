@@ -121,7 +121,14 @@ def cmd_build(a):
     daily_sets = [d for d in getattr(m, "FRESHNESS_DATASETS", ["price"])]
     qrep = quality.report(st, fs, daily_sets, getattr(m, "SOURCES", {}))
     log.info("data quality: %d of %d checks need attention", qrep["n_fail"], qrep["n"])
-    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep)
+    from . import signals
+    try:
+        ev = signals.compute(fs, scores)
+        sig = {"stats": signals.evaluate(fs, ev), "recent": signals.recent(ev)}
+    except Exception:
+        log.exception("signals failed")
+        sig = None
+    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig)
     log.info("build done: %s", res)
 
 

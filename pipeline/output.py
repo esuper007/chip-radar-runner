@@ -71,7 +71,7 @@ def _model_labels(fs: FactorSet) -> dict:
 
 
 def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics: dict,
-          freshness: dict, key_factors: list[str], quality: dict | None = None) -> dict:
+          freshness: dict, key_factors: list[str], quality: dict | None = None, sig: dict | None = None) -> dict:
     out_dir = DIST / fs.market
     t = fs.calendar[-1]
     sc = {k: v.loc[t] for k, v in scores.items()}
@@ -94,6 +94,8 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
         row["sub"] = {k[2:]: _r(v.get(c), 1) for k, v in sc.items() if k.startswith("s_")}
         row["f"] = {k: _r(v.get(c), 3) for k, v in F.items()}
         row["sig"] = flags.get(c, [])
+        if sig and c in sig.get("recent", {}):
+            row["bs"] = sig["recent"][c]          # bottom-up signals: {key: trading days ago}
         if c in fc.index:
             fr = fc.loc[c]
             row["fc"] = {}
@@ -146,6 +148,7 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
         "freshness": freshness, "labels": {**fs.labels, **_model_labels(fs)}, "groups": list(fs.score_spec.keys()),
         "group_weights": fs.group_weights, "key_factors": key_factors, "series_names": ser_names,
         "shards": SHARDS, "quality": quality or {},
+        "signals": (sig or {}).get("stats", {}),
     }
     _dump(out_dir / "summary.js", summary)
     return {"rows": len(rows), "asof": str(t.date())}

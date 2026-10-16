@@ -15,6 +15,9 @@ from .factors import FactorSet
 
 HORIZONS = {"1q": 63, "6m": 126, "1y": 252}
 SAMPLE_EVERY = 5          # use one training row per stock per week
+BT_MAX_TRAIN = 300_000    # backtest only: rows per training fold
+BT_MAX_QUERY = 8_000      # backtest only: analog queries per test year
+BT_ANALOG_POOL = 120_000  # backtest only: analog search pool
 MIN_LABEL_WEEKS = 100     # forecasts are withheld until ~2 years of outcomes exist
 EXCLUDE = {"holders"}     # absolute levels that are not comparable across stocks
 
@@ -172,12 +175,20 @@ def backtest(X: pd.DataFrame, Y: pd.DataFrame, cal: pd.DatetimeIndex, first_test
             te = (dates >= test_start) & (dates < pd.Timestamp(f"{yr + 1}-01-01"))
             if tr.sum() < 20_000 or te.sum() == 0:
                 continue
-            m = ml_fit(X[tr], y[tr])
+            # Backtests are for measuring quality, not for the live model: cap the work per fold so
+            # large markets (US ~7k stocks x 12 years) finish in minutes instead of hours.
+            rng = np.random.default_rng(yr)
+            tr_idx = np.where(tr)[0]
+            if len(tr_idx) > BT_MAX_TRAIN:
+                tr_idx = np.sort(rng.choice(tr_idx, BT_MAX_TRAIN, replace=False))
+            m = ml_fit(X.iloc[tr_idx], y.iloc[tr_idx])
             preds_ml.append(ml_predict(m, X[te]))
-            # analogs on monthly test dates (cheaper)
+            # analogs on monthly test dates, at most BT_MAX_QUERY stocks-dates per year
             te_dates = sorted(set(dates[te]))[::4]
-            te_m = dates.isin(te_dates)
-            preds_an.append(analog_predict(X[tr], y[tr], X[te_m]))
+            q_idx = np.where(dates.isin(te_dates))[0]
+            if len(q_idx) > BT_MAX_QUERY:
+                q_idx = np.sort(rng.choice(q_idx, BT_MAX_QUERY, replace=False))
+            preds_an.append(analog_predict(X.iloc[tr_idx], y.iloc[tr_idx], X.iloc[q_idx], max_pool=BT_ANALOG_POOL))
             log.info("backtest %s %d: train=%d test=%d", hk, yr, tr.sum(), te.sum())
         res = {}
         if preds_ml:

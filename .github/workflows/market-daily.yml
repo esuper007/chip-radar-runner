@@ -21,7 +21,8 @@ permissions:
   contents: write
   actions: write
 concurrency:
-  group: dist-publish
+  # one run per market at a time; markets run in parallel (publish_dist.sh merges safely)
+  group: market-${{ github.event.inputs.market || (github.event.schedule == '30 9 * * 1-5' && 'jp') || (github.event.schedule == '30 10 * * 1-5' && 'cn') || (github.event.schedule == '30 11 * * 1-5' && 'hk') || (github.event.schedule == '30 23 * * 1-5' && 'us') || 'tw' }}
   cancel-in-progress: false
 jobs:
   run:
