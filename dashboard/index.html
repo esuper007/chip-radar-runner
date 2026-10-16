@@ -141,6 +141,14 @@ body.usconv .pill.ok{color:var(--up)}
 .v2{font-size:11px;color:var(--muted);font-family:var(--f-num);text-align:right}
 .star{border:0;background:transparent;padding:0 2px;font-size:16px;line-height:1;color:var(--muted)}
 .star.on{color:var(--warn)}
+.wts{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13px;margin:-2px 0 10px;padding:8px 10px;background:var(--sunk);border-radius:var(--r)}
+.wts label{display:flex;gap:4px;align-items:center}
+.wts input{width:4.2em;border:1px solid var(--line);background:var(--surface);border-radius:4px;padding:3px 6px;font-family:var(--f-num);text-align:right}
+.rlist li.hl-up{background:color-mix(in srgb,var(--up-c) 13%,transparent);box-shadow:inset 3px 0 0 var(--up-c)}
+.rlist li.hl-dn{background:color-mix(in srgb,var(--down-c) 13%,transparent);box-shadow:inset 3px 0 0 var(--down-c)}
+.hl-up .rk,.hl-up .nm{color:var(--up-c);font-weight:700} .hl-dn .rk,.hl-dn .nm{color:var(--down-c);font-weight:700}
+#rkDual:empty{display:none}
+#rkDual{margin:0 0 10px;font-size:13px}
 .wl-form{display:flex;flex-wrap:wrap;gap:8px}
 .wl-form input{flex:1 1 220px;border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:6px 10px;min-width:0}
 .delta{font-family:var(--f-num)}
@@ -193,8 +201,17 @@ body.usconv .pill.ok{color:var(--up)}
         <label><input type="checkbox" id="rkLiq" checked> 只看流動性足夠</label>
         <label><input type="checkbox" id="rkFund" checked> 排除基金／ETF</label>
       </div></div>
+    <div class="wts" id="rkW">
+      <span class="muted">加權綜合的權重</span>
+      <label>樣本內外 <input type="number" id="wIs" min="0" max="100" step="5" inputmode="numeric">%</label>
+      <label>機器學習 <input type="number" id="wMl" min="0" max="100" step="5" inputmode="numeric">%</label>
+      <label>歷史相似 <input type="number" id="wAn" min="0" max="100" step="5" inputmode="numeric">%</label>
+      <span class="note" id="wSum"></span>
+      <button class="btn" type="button" id="wReset">恢復 70／15／15</button>
+    </div>
+    <p id="rkDual"></p>
     <div class="rank4" id="rank"></div>
-    <p class="hint">上漲機率是模型估計的「期間結束時股價高於現在」的機率，下跌機率＝1－上漲機率；漲跌幅是含息報酬的中位數預估。「加權綜合」以樣本內外模型為主（70%），機器學習與歷史相似各占 15%；某方法沒有數值時，權重按其餘方法重新分配。排行只代表模型的相對看法，可信度請對照下方的回測成績。點一列看詳細籌碼，按 ☆ 加入觀察清單。</p>
+    <p class="hint">上漲機率是模型估計的「期間結束時股價高於現在」的機率，下跌機率＝1－上漲機率；漲跌幅是含息報酬的中位數預估。「加權綜合」預設以樣本內外模型為主（70%），機器學習與歷史相似各占 15%，可在上方自行調整；合計不是 100% 時按比例換算，某方法沒有數值時，權重按其餘方法重新分配。<b>醒目標示</b>：同時進入「上漲機率」與「預估漲幅」前 20 名的以紅底標示（雙榜看漲），同時進入「下跌機率」與「預估跌幅」前 20 名的以綠底標示（雙榜看跌），顏色隨漲跌慣例切換；完整名單列在排行上方。排行只代表模型的相對看法，可信度請對照下方的回測成績。點一列看詳細籌碼，按 ☆ 加入觀察清單。</p>
   </section>
 
   <section class="pulse" id="pulse" aria-label="市場籌碼概況"></section>
@@ -294,7 +311,7 @@ async function loadMarket(){
     if (!(e && e.status)) console.error("render failed", e);
     $("asof").textContent = "尚無資料";
     $("pinfo").textContent = ""; $("prev").disabled = $("next").disabled = true;
-    $("dq").innerHTML = ""; $("rank").innerHTML = ""; renderWatch();
+    $("dq").innerHTML = ""; $("rank").innerHTML = ""; $("rkDual").innerHTML = ""; renderWatch();
     $("rows").innerHTML = `<tr><td colspan="10" class="empty"><strong>${MARKETS.find(x=>x[0]===m)[1]}的資料還在準備中</strong>第一次計算完成並同步後就會出現在這裡。</td></tr>`;
   }
 }
@@ -533,15 +550,50 @@ async function explain(r){
 const avgOf = xs => { xs = xs.filter(x => x != null); return xs.length ? xs.reduce((p,c)=>p+c,0)/xs.length : null; };
 // Ranking blend: in/out-of-sample model 70%, machine learning 15%, historical analogs 15%
 // (weights are renormalised over the methods that have a value for this stock).
-const RANK_W = {is: 0.70, ml: 0.15, an: 0.15};
+const W_DEF = {is: 70, ml: 15, an: 15};
+let RANK_W = {...W_DEF};
+const W_IN = {is: "wIs", ml: "wMl", an: "wAn"};
+function cleanW(o){ const w = {}; for (const k of Object.keys(W_DEF)){ const v = Number(o?.[k]); w[k] = isFinite(v) && v >= 0 ? Math.min(v, 1000) : W_DEF[k]; }
+  return Object.values(w).some(v => v > 0) ? w : {...W_DEF}; }
+try{ RANK_W = cleanW(JSON.parse(store.get("rankWeights") || "null") || W_DEF); }catch(e){ RANK_W = {...W_DEF}; }
+const PREF = {ref: null};
+function showW(){
+  for (const [k,id] of Object.entries(W_IN)) $(id).value = RANK_W[k];
+  const tot = Object.values(RANK_W).reduce((a,b) => a+b, 0);
+  $("wSum").textContent = tot === 100 ? "合計 100%" : `合計 ${fmt(tot,0)}%，會依比例換算成 ${Object.keys(W_DEF).map(k => fmt(RANK_W[k]/tot*100,0)+"%").join("／")}`;
+  $("rkM").options[0].textContent = `加權綜合（樣本內外 ${fmt(RANK_W.is/tot*100,0)}%）`;
+  $("rkW").hidden = $("rkM").value !== "avg";
+}
+async function saveW(){
+  store.set("rankWeights", JSON.stringify(RANK_W));
+  if (PREF.ref){ try{ await PREF.ref.set({rank_weights: RANK_W, updated_at: new Date().toISOString()}); }catch(e){} }
+}
+function readW(){
+  const raw = Object.fromEntries(Object.entries(W_IN).map(([k,id]) => [k, $(id).value === "" ? 0 : Number($(id).value)]));
+  if (!Object.values(raw).some(v => v > 0)){ $("wSum").textContent = "權重不能全部為 0，已恢復預設。"; return {...W_DEF}; }
+  return cleanW(raw);
+}
+Object.values(W_IN).forEach(id => $(id).addEventListener("change", () => {
+  const zero = !Object.values(W_IN).some(i => Number($(i).value) > 0);
+  RANK_W = readW(); showW(); if (zero) $("wSum").textContent = "權重不能全部為 0，已恢復預設 70／15／15。"; renderRank(); saveW(); }));
+$("wReset").onclick = () => { RANK_W = {...W_DEF}; showW(); renderRank(); saveW(); };
+async function prefsConnect(db, uid){
+  const ref = db.doc("data/users/" + uid + "/prefs");
+  try{
+    const snap = await ref.get();
+    if (snap.exists && snap.data()?.rank_weights){ RANK_W = cleanW(snap.data().rank_weights); store.set("rankWeights", JSON.stringify(RANK_W)); showW(); renderRank(); }
+    PREF.ref = ref;
+  }catch(e){}
+}
 const wAvg = (r,h,stat) => { let s = 0, w = 0; for (const [k,wt] of Object.entries(RANK_W)){ const v = r.fc?.[k]?.[h]?.[stat]; if (v != null){ s += v*wt; w += wt; } } return w ? s/w : null; };
 const pUp = (r,h,m) => m === "avg" ? wAvg(r,h,"p_up") : (r.fc?.[m]?.[h]?.p_up ?? null);
 const q50 = (r,h,m) => m === "avg" ? wAvg(r,h,"q50") : (r.fc?.[m]?.[h]?.q50 ?? null);
+showW();
 const sgn = v => v == null ? "—" : (v > 0 ? "+" : "") + fmt(v,1) + "%";
 for (const id of ["rkH","rkM"]){ const v = store.get(id); if (v && [...$(id).options].some(o => o.value === v)) $(id).value = v; }
 for (const id of ["rkLiq","rkFund"]) if (store.get(id) === "0") $(id).checked = false;
 ["rkH","rkM","rkLiq","rkFund"].forEach(id => $(id).addEventListener("change", () => {
-  store.set(id, $(id).type === "checkbox" ? ($(id).checked ? "1" : "0") : $(id).value); renderRank(); }));
+  store.set(id, $(id).type === "checkbox" ? ($(id).checked ? "1" : "0") : $(id).value); showW(); renderRank(); }));
 const FUND = /\b(FUND|ETF|ETN|MUNICIPAL|MUNI)\b/i;
 
 function renderRank(){
@@ -552,19 +604,28 @@ function renderRank(){
   const withP = pool.filter(x => x.p != null), withQ = pool.filter(x => x.q != null);
   if (!withP.length && !withQ.length){
     const w = (S.summary[S.market]?.train_weeks || {})[h] || 0;
+    $("rkDual").innerHTML = "";
     el.innerHTML = `<div class="empty" style="grid-column:1/-1"><strong>${MARKETS.find(x=>x[0]===S.market)[1]}${hn}預測尚未產生</strong>模型需要約 100 週已知結果的歷史樣本，目前 ${fmt(w,0)} 週；歷史資料回補完成後就會出現排行。</div>`;
     return;
   }
   const top = (arr, key, dir) => arr.slice().sort((a,b) => (a[key]-b[key])*dir).slice(0,20);
+  const L = {pu: top(withP,"p",-1), pd: top(withP,"p",1), qu: top(withQ,"q",-1), qd: top(withQ,"q",1)};
+  const inter = (a, b) => { const sb = new Set(b.map(x => x.r.c)); return a.filter(x => sb.has(x.r.c)); };
+  const dualUp = inter(L.pu, L.qu), dualDn = inter(L.pd, L.qd);
+  const UP = new Set(dualUp.map(x => x.r.c)), DN = new Set(dualDn.map(x => x.r.c));
+  const names = arr => arr.map(x => `<b class="num">${esc(x.r.c)}</b> ${esc(x.r.n)}`).join("、");
+  $("rkDual").innerHTML = [dualUp.length ? `<span class="up">▲ 雙榜看漲 ${dualUp.length} 檔</span>：${names(dualUp)}` : "",
+                           dualDn.length ? `<span class="down">▼ 雙榜看跌 ${dualDn.length} 檔</span>：${names(dualDn)}` : ""].filter(Boolean).join("<br>");
+  const hl = c => UP.has(c) ? "hl-up" : DN.has(c) ? "hl-dn" : "";
   const card = (title, sub, list, main, aux) => `<div class="rcard"><h3>${title}<small>${sub}</small></h3>${list.length ? `<ol class="rlist">${list.map((x,i) =>
-    `<li data-c="${esc(x.r.c)}" tabindex="0"><span class="rk">${i+1}</span><span class="cd">${esc(x.r.c)}</span><span class="nm" title="${esc(x.r.n)}">${esc(x.r.n)}</span>${main(x)}${aux(x)}<button class="star ${wlHas(x.r.c)?"on":""}" data-star="${esc(x.r.c)}" aria-label="${wlHas(x.r.c)?"移出":"加入"}觀察清單：${esc(x.r.n)}">${wlHas(x.r.c)?"★":"☆"}</button></li>`).join("")}</ol>` : `<div class="muted">沒有資料</div>`}</div>`;
+    `<li data-c="${esc(x.r.c)}" tabindex="0" class="${hl(x.r.c)}"${hl(x.r.c) ? ` title="雙榜：${UP.has(x.r.c) ? "上漲機率與預估漲幅" : "下跌機率與預估跌幅"}皆在前 20 名"` : ""}><span class="rk">${i+1}</span><span class="cd">${esc(x.r.c)}</span><span class="nm" title="${esc(x.r.n)}">${esc(x.r.n)}</span>${main(x)}${aux(x)}<button class="star ${wlHas(x.r.c)?"on":""}" data-star="${esc(x.r.c)}" aria-label="${wlHas(x.r.c)?"移出":"加入"}觀察清單：${esc(x.r.n)}">${wlHas(x.r.c)?"★":"☆"}</button></li>`).join("")}</ol>` : `<div class="muted">沒有資料</div>`}</div>`;
   const P = (v, cls) => `<span class="v1 ${cls}">${pct(v)}</span>`, Q = v => `<span class="v1 ${tone(v)}">${sgn(v)}</span>`;
   const auxQ = x => `<span class="v2" title="預估漲跌幅中位數">${sgn(x.q)}</span>`, auxP = x => `<span class="v2" title="上漲機率">${pct(x.p)}</span>`;
   el.innerHTML =
-    card("上漲機率最高", `${hn}｜旁註：中位數`, top(withP,"p",-1), x => P(x.p,"up"), auxQ) +
-    card("下跌機率最高", `${hn}｜旁註：中位數`, top(withP,"p",1), x => P(1-x.p,"down"), auxQ) +
-    card("預估漲幅最大", `${hn}｜旁註：上漲機率`, top(withQ,"q",-1), x => Q(x.q), auxP) +
-    card("預估跌幅最大", `${hn}｜旁註：上漲機率`, top(withQ,"q",1), x => Q(x.q), auxP);
+    card("上漲機率最高", `${hn}｜旁註：中位數`, L.pu, x => P(x.p,"up"), auxQ) +
+    card("下跌機率最高", `${hn}｜旁註：中位數`, L.pd, x => P(1-x.p,"down"), auxQ) +
+    card("預估漲幅最大", `${hn}｜旁註：上漲機率`, L.qu, x => Q(x.q), auxP) +
+    card("預估跌幅最大", `${hn}｜旁註：上漲機率`, L.qd, x => Q(x.q), auxP);
 }
 $("rank").addEventListener("click", async e => {
   const st = e.target.closest("[data-star]"); if (st){ e.stopPropagation(); await wlToggle(st.dataset.star); return; }
@@ -657,6 +718,7 @@ async function wlConnect(){
   const [db, user] = await Promise.all([claude.use("db"), claude.use("user")]);
   if (!db || !user) return;
   const id = await user.id(); if (!id) return;
+  prefsConnect(db, id);
   const ref = db.doc("data/users/" + id + "/watchlist");
   try{
     const snap = await ref.get();
