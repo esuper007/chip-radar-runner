@@ -94,6 +94,12 @@ table.grid{width:100%;border-collapse:collapse;font-size:13px}
 .empty strong{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
 
 /* drawer */
+.confirm{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:16px;background:color-mix(in srgb,var(--ink) 35%,transparent)}
+.confirm-box{width:min(480px,100%);max-height:100%;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;display:grid;gap:12px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.confirm-box h3{margin:0;font-family:var(--f-display);font-size:20px}
+.confirm-box ul{margin:0;padding-left:1.2em;display:grid;gap:4px;font-size:13.5px}
+.confirm-box .time{font-family:var(--f-num);font-weight:600;color:var(--accent)}
+.confirm-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 .drawer{position:fixed;inset:0;z-index:20;display:flex;justify-content:flex-end;background:color-mix(in srgb,var(--ink) 30%,transparent)}
 .sheet{width:min(720px,100%);height:100%;overflow:auto;background:var(--bg);border-left:1px solid var(--line);
   padding:calc(16px + env(safe-area-inset-top,0px)) max(18px,env(safe-area-inset-right,0px)) calc(28px + env(safe-area-inset-bottom,0px)) 18px;display:grid;gap:16px;align-content:start}
@@ -277,6 +283,14 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <div class="pager"><span id="pinfo" class="muted"></span><button class="btn" id="prev">上一頁</button><button class="btn" id="next">下一頁</button></div>
   </section>
   <p class="note">本頁所有數字皆來自各交易所與主管機關公開資料，預測為歷史統計推估的機率，不構成投資建議。</p>
+</div>
+
+<div class="confirm" id="confirm" hidden>
+  <div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle" aria-describedby="cfBody">
+    <h3 id="cfTitle"></h3>
+    <div id="cfBody"></div>
+    <div class="confirm-actions"><button class="btn" id="cfCancel">取消</button><button class="btn primary" id="cfOk">確定執行</button></div>
+  </div>
 </div>
 
 <div class="drawer" id="drawer" hidden>
@@ -825,8 +839,33 @@ async function fire(kind){
         c === "server_unavailable" ? "更新服務暫時無法連線，請稍後再按一次。" : "觸發失敗：" + (e?.message || c));
   }finally{ b.disabled = false; }
 }
-$("btnSync").onclick = () => fire("sync");
-$("btnFull").onclick = () => fire("full");
+// Both buttons start background work, so the first click only explains what will happen;
+// nothing runs until 「確定執行」 is pressed.
+const CONFIRM = {
+  sync: {title: "同步最新結果", time: "約 5–10 分鐘",
+    items: ["把 GitHub 上已經算好的最新結果搬到這個儀表板，不會重新抓資料、也不會重算。",
+            "適合在各市場例行更新完成後，不想等自動同步（每天上午 9:20、晚上 11:20）時使用。",
+            "完成後重新整理頁面即可看到結果。"]},
+  full: {title: "重新抓取資料", time: "約 45–70 分鐘",
+    items: ["五個市場同時重新抓取最新籌碼與股價，重算分數、訊號與預測，完成後自動同步到這裡。",
+            "平常不需要按：每個市場收盤後本來就會自動更新。適合例行更新失敗、或想立刻取得剛公布的資料時使用。",
+            "官方尚未公布前按，會得到和前一天相同的結果（台股三大法人約下午 3 點後、融資融券約晚上 9 點半後公布）。",
+            "不會重新訓練模型（模型固定每週六重新訓練）。"]},
+};
+let cfKind = null, cfReturn = null;
+function askConfirm(kind){
+  const c = CONFIRM[kind]; cfKind = kind; cfReturn = document.activeElement;
+  $("cfTitle").textContent = c.title;
+  $("cfBody").innerHTML = `<p style="margin:0 0 8px">所需時間：<span class="time">${c.time}</span></p><ul>${c.items.map(t => `<li>${esc(t)}</li>`).join("")}</ul><p class="note" style="margin:10px 0 0">確定要執行嗎？</p>`;
+  $("confirm").hidden = false; $("cfCancel").focus();
+}
+function closeConfirm(){ $("confirm").hidden = true; cfKind = null; cfReturn?.focus?.(); }
+$("cfCancel").onclick = closeConfirm;
+$("cfOk").onclick = () => { const k = cfKind; closeConfirm(); if (k) fire(k); };
+$("confirm").addEventListener("click", e => { if (e.target === $("confirm")) closeConfirm(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("confirm").hidden) closeConfirm(); });
+$("btnSync").onclick = () => askConfirm("sync");
+$("btnFull").onclick = () => askConfirm("full");
 
 // ---------- boot ----------
 (async () => {
