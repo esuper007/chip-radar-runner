@@ -5,7 +5,7 @@ on:
     - cron: "0 2 * * 6"   # Sat 10:00 Taipei
   workflow_dispatch:
     inputs:
-      market: { description: "tw / us / jp / hk / cn", default: tw, required: true }
+      market: { description: "all / tw / us / jp / hk / cn", default: all, required: true }
 permissions:
   contents: write
 concurrency:
@@ -17,7 +17,7 @@ jobs:
       max-parallel: 1
       fail-fast: false
       matrix:
-        market: ${{ fromJSON(github.event.inputs.market && format('["{0}"]', github.event.inputs.market) || '["tw","us","jp","hk","cn"]') }}
+        market: ${{ fromJSON((github.event.inputs.market && github.event.inputs.market != 'all') && format('["{0}"]', github.event.inputs.market) || '["tw","us","jp","hk","cn"]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 340
     env:

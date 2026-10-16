@@ -368,13 +368,15 @@ function renderQuality(s){
   for (const [h, n] of HZ){
     const r = m[h]; if (!r) continue;
     const base = (r.ml||r.analog||{}).base_rate_up;
-    html += row(`${n}・機器學習`, r.ml, base) + row(`${n}・歷史相似`, r.analog, base);
+    const pend = lab => `<tr><td>${lab}</td><td colspan="6" class="muted" style="text-align:left">逐年回測尚未產生（每週六上午 10:00 重新訓練時計算）</td></tr>`;
+    html += (r.ml ? row(`${n}・機器學習`, r.ml, base) : pend(`${n}・機器學習`)) + (r.analog ? row(`${n}・歷史相似`, r.analog, base) : pend(`${n}・歷史相似`));
     if (r.is){
       html += row(`${n}・樣本內外模型（樣本內）`, r.is.in_sample, r.is.in_sample?.base_rate_up) + row(`${n}・樣本內外模型（樣本外）`, r.is.out_of_sample, r.is.out_of_sample?.base_rate_up);
     }
     if (r.score_only) html += `<tr><td>${n}・籌碼分數本身</td><td colspan="3" class="muted">只看排序能力</td><td class="num">${fmt(r.score_only.rank_ic,3)}</td><td class="num ${tone(r.score_only.top_minus_bottom_pct)}">${fmt(r.score_only.top_minus_bottom_pct,1)}%</td><td></td></tr>`;
   }
   html += `</tbody></table>`;
+  if (m.computed_at) html += `<p class="hint" style="margin-top:8px">機器學習與歷史相似：每年一折逐步往前回測（只用測試年度以前的資料訓練，訓練資料的報酬期間必須在測試年度開始前結束），回測日期 ${esc(m.computed_at)}。</p>`;
   const isAny = HZ.map(([h,n]) => [n, m[h]?.is]).filter(([,x]) => x);
   if (isAny.length){
     const [n0, x0] = isAny[0], L = s.labels || {};
