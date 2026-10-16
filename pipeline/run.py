@@ -128,12 +128,7 @@ def cmd_build(a):
     except Exception:
         log.exception("signals failed")
         sig = None
-    from . import surge
-    try:
-        sg = surge.compute(fs, scores, st)
-    except Exception:
-        log.exception("surge similarity failed")
-        sg = None
+    sg = None      # 飆股相似度 retired 2026-10 (never passed validation); replaced by breakout analysis
     from . import breakout
     try:
         bo = breakout.compute(fs, scores, st)

@@ -279,7 +279,8 @@ def compute(fs: FactorSet, scores: dict, store=None) -> dict | None:
                 k5 = min(int(pct[j] * 5), 4)
                 best = np.argsort(-contrib[j])[:3]
                 today[int(c)][mode] = {"p": round(float(pct[j]) * 100, 1), "sr": quint[k5],
-                                       "m": [_label(keys[k], fs) for k in best if contrib[j, k] > 0]}
+                                       "m": [_label(keys[k], fs) + ("偏高" if w[k] > 0 else "偏低")
+                                             for k in best if contrib[j, k] > 0]}
         log.info("breakout %s: L=%d lift=%s excess=%s valid=%s", mode, L, v.get("lift"), v.get("excess"), v.get("valid"))
     res["today"] = [{"c": str(fs.codes[c]), **today[c]} for c in today]
     return res
