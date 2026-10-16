@@ -95,6 +95,7 @@ table.grid{width:100%;border-collapse:collapse;font-size:13px}
 .empty strong{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
 
 /* drawer */
+[hidden]{display:none!important}
 .confirm{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:16px;background:color-mix(in srgb,var(--ink) 35%,transparent)}
 .confirm-box{width:min(480px,100%);max-height:100%;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;display:grid;gap:12px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
 .confirm-box h3{margin:0;font-family:var(--f-display);font-size:20px}
@@ -266,6 +267,30 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <p class="hint">做法：每年漲幅前 N% 的股票（流動性足夠者）為「飆股」，以它起漲前的最低點為基準，取低點前 A 個交易日到低點後 B 個交易日的籌碼（各子分數與評分因子的全市場百分位，取低點前、低點後的平均及兩者差）。和同期所有股票比較，找出飆股明顯不同的特徵並依差異大小加權，再計算每檔股票最近 A+B 個交易日的籌碼和這個樣貌的相似度。股價本身不列入比對，避免變成單純追漲。驗證時只用前幾年的飆股建立樣貌，檢查之後每月相似度前 50 名在接下來一年成為前 N% 的比例，和隨機的 N% 比較；提升倍數 ≥ 1.3 且一年超額報酬為正才標示「有效」。A 和 B 預設由系統每季底自動最佳化：在 A＋B＝123 日、每次調整 17 日的 8 種組合中，各市場挑驗證提升倍數最高的一組。</p>
   </section>
 
+  <section class="panel" aria-label="突破型起漲">
+    <div class="sec-head"><h2>突破型起漲：剛突破一年高點，哪些籌碼最像「突破後真的大漲」</h2>
+      <nav class="tabs" role="tablist" aria-label="成功標準" id="boModes">
+        <button role="tab" data-bo="h126q10" aria-selected="true">半年報酬前 10%</button>
+        <button role="tab" data-bo="h252q20" aria-selected="false">一年報酬前 20%</button>
+      </nav></div>
+    <p class="hint" id="boStatus" style="margin:0 0 10px"></p>
+    <h2 style="font-size:14px;margin:6px 0">最近 5 個交易日剛突破</h2>
+    <div class="scroll"><table class="grid"><thead><tr>
+      <th class="l">代號</th><th class="l">名稱</th><th>收盤</th><th>突破</th><th>籌碼分數</th><th title="這次突破的籌碼樣貌，在歷史所有突破中的排名（100 最像成功的突破）">成功樣貌排名</th><th title="歷史上同一排名區間（五等分）的突破，實際達成成功標準的比例">歷史成功率</th><th class="l">主要加分特徵</th><th></th>
+    </tr></thead><tbody id="boRows"></tbody></table></div>
+    <h2 style="font-size:14px;margin:14px 0 6px">距一年高點 3% 以內（尚未突破）</h2>
+    <div class="scroll"><table class="grid"><thead><tr>
+      <th class="l">代號</th><th class="l">名稱</th><th>收盤</th><th>距高點</th><th>籌碼分數</th><th>成功樣貌排名</th><th>歷史成功率</th><th class="l">主要加分特徵</th><th></th>
+    </tr></thead><tbody id="boNear"></tbody></table></div>
+    <div class="pager"><span id="boInfo" class="muted"></span><button class="btn" id="boMore">顯示更多</button></div>
+    <div class="dq" style="margin-top:12px">
+      <div><h2>歷史驗證（逐年往前，不使用未來資料）</h2><div class="scroll" id="boVal"></div></div>
+      <div><h2>成功突破和失敗突破最不同的籌碼特徵</h2><div id="boTraits" class="scroll"></div></div>
+      <div><h2>觀察期長度最佳化（每季底重新計算）</h2><div id="boOpt" class="scroll"></div></div>
+    </div>
+    <p class="hint">做法：收盤價創下前 250 個交易日的新高、且前 60 日內沒創過新高（整理後的第一次突破）視為一次「突破」。成功標準有兩種：突破後半年（126 個交易日）報酬落在同日全市場前 10%，或突破後一年（252 個交易日）報酬落在前 20%。觀察突破前 L 日的籌碼：突破前半年（123 日）平均、更早的前段平均（L &gt; 123 時）、兩段的變化，以及突破前 20 日；L 由系統每季在 123、189、255 日中挑選。拿「成功的突破」和「所有突破」比較，找出成功突破明顯不同的籌碼特徵並加權。驗證時只用之前已知結果的突破建立樣貌，檢查每年排名前 20% 的突破成功率是否高於當年所有突破；提升倍數 ≥ 1.3 且報酬優於所有突破平均才標示「有效」。「歷史成功率」來自逐年驗證中同一排名區間的實際結果。這些是機率，不保證個股會上漲。</p>
+  </section>
+
   <section class="pulse" id="pulse" aria-label="市場籌碼概況"></section>
 
   <section class="panel" aria-label="預測模型可信度">
@@ -378,7 +403,7 @@ async function loadMarket(){
     renderSummary();
     if (!S.screen[m]) S.screen[m] = await getJSON(dataUrl("screen"));
     if (m !== S.market) return;
-    buildFilters(); renderRows(); renderRank(); renderSignals(); renderSurge(); renderWatch();
+    buildFilters(); renderRows(); renderRank(); renderSignals(); renderSurge(); renderBreakout(); renderWatch();
   }catch(e){
     if (m !== S.market) return;
     if (!(e && e.status)) console.error("render failed", e);
@@ -833,6 +858,58 @@ $("sgOk").onclick = () => {
     $("sgDlgNote").textContent = "數值超出範圍：往前 0–250、往後 0–120、前 1–30%。"; return; }
   closeSgDlg(); fire("surge", `surge pre=${pre} post=${post} top=${top}`);
 };
+
+// ---------- breakout to a 1-year high ----------
+const BO = {mode: "h126q10", shown: 30};
+try { const m = localStorage.getItem("boMode"); if (m === "h126q10" || m === "h252q20") BO.mode = m; } catch (e) {}
+$("boModes").addEventListener("click", e => { const b = e.target.closest("[data-bo]"); if (!b) return;
+  BO.mode = b.dataset.bo; try { localStorage.setItem("boMode", BO.mode); } catch (e) {} renderBreakout(); });
+$("boMore").onclick = () => { BO.shown += 30; renderBreakout(); };
+function boRow(r, x, m, kind){
+  const v = x[BO.mode] || {};
+  return `<tr data-c="${esc(r.c)}" tabindex="0"><td class="l num">${esc(r.c)}</td><td class="l">${esc(r.n)}</td><td class="num">${fmt(r.px,2)}</td>
+    <td class="num">${kind === "near" ? "−" + fmt(x.g,1) + "%" : x.d === 0 ? "今天" : x.d + " 日前"}</td>
+    <td><span class="score"><span class="meter"><i style="width:${r.sc}%"></i></span><b>${fmt(r.sc,1)}</b></span></td>
+    <td><span class="sv">${v.p != null ? fmt(v.p,0) : "—"}</span></td>
+    <td class="num">${v.sr != null ? `<b>${pct(v.sr)}</b> <span class="muted">／${pct(m.validation?.base_rate)}</span>` : "—"}</td>
+    <td class="l wrapc">${(v.m||[]).map(t => `<span class="trait">${esc(t)}</span>`).join(" ")}</td>
+    <td><button class="star ${wlHas(r.c)?"on":""}" data-star="${esc(r.c)}" aria-label="${wlHas(r.c)?"移出":"加入"}觀察清單：${esc(r.n)}">${wlHas(r.c)?"★":"☆"}</button></td></tr>`;
+}
+function renderBreakout(){
+  document.querySelectorAll("#boModes [data-bo]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.bo === BO.mode)));
+  const bo = S.summary[S.market]?.breakout || {}, m = (bo.modes || {})[BO.mode] || {}, v = m.validation || {};
+  const sc = S.screen[S.market], byC = new Map((sc?.rows || []).map(r => [r.c, r]));
+  $("boStatus").innerHTML = bo.status === "ok" && m.status === "ok"
+    ? `觀察期 ${m.L} 日。歷史共 ${fmt(bo.n_events,0)} 次突破，其中達成「${esc(m.name)}」的比例為 ${pct(m.base_rate_all)}（一般股票為 ${pct(m.q)}）。驗證：<span class="pill ${m.valid ? "ok2" : "ng"}">${m.valid ? "有效" : "未通過"}</span> 籌碼樣貌排名前 20% 的突破成功率 ${v.top_rate != null ? pct(v.top_rate) : "—"}，所有突破 ${v.base_rate != null ? pct(v.base_rate) : "—"}（提升 ${v.lift != null ? fmt(v.lift,2) + " 倍" : "—"}）。`
+    : bo.status === "insufficient" || m.status === "insufficient" ? `這個市場的籌碼歷史還不夠長（需要約 2 年），暫時無法分析。` : `尚未計算，下次資料更新後出現。`;
+  const today = (bo.today || []).filter(x => byC.has(x.c)), key = x => x[BO.mode]?.p ?? -1;
+  const brk = today.filter(x => x.d >= 0).sort((a,b) => key(b) - key(a)), near = today.filter(x => x.d < 0).sort((a,b) => key(b) - key(a));
+  const empty = (msg) => `<tr><td colspan="9" class="empty">${msg}</td></tr>`;
+  $("boRows").innerHTML = brk.length ? brk.slice(0, BO.shown).map(x => boRow(byC.get(x.c), x, m, "brk")).join("") : empty("最近 5 個交易日沒有符合條件的突破。");
+  $("boNear").innerHTML = near.length ? near.slice(0, BO.shown).map(x => boRow(byC.get(x.c), x, m, "near")).join("") : empty("目前沒有接近一年高點的股票。");
+  $("boInfo").textContent = today.length ? `剛突破 ${brk.length} 檔、接近高點 ${near.length} 檔` : "";
+  $("boMore").hidden = Math.max(brk.length, near.length) <= BO.shown;
+  $("boVal").innerHTML = (v.per_year || []).length ? `<table class="mq"><thead><tr><th>年度</th><th>突破次數</th><th>前 20% 成功率</th><th>所有突破</th><th>報酬差</th></tr></thead><tbody>
+    ${v.per_year.map(y => `<tr><td>${y.year}</td><td class="num">${fmt(y.n,0)}</td><td class="num">${pct(y.top_rate)}</td><td class="num muted">${pct(y.base_rate)}</td><td class="num ${tone(y.excess)}">${y.excess > 0 ? "+" : ""}${fmt(y.excess,2)}%</td></tr>`).join("")}
+    <tr><td><b>合計</b></td><td class="num">${fmt(v.n_events,0)}</td><td class="num"><b>${pct(v.top_rate)}</b></td><td class="num muted">${pct(v.base_rate)}</td><td class="num ${tone(v.excess)}"><b>${v.excess > 0 ? "+" : ""}${fmt(v.excess,2)}%</b></td></tr></tbody></table>
+    ${(v.quintiles || []).length ? `<p class="hint" style="margin-top:6px">依樣貌排名五等分的成功率（低→高）：${v.quintiles.map(q => q == null ? "—" : pct(q)).join("、")}。</p>` : ""}`
+    : `<span class="muted">尚無驗證結果。</span>`;
+  $("boTraits").innerHTML = (m.traits || []).length ? `<table class="mq"><thead><tr><th>特徵</th><th>成功突破的差異（標準差）</th></tr></thead><tbody>
+    ${m.traits.map(t => `<tr><td>${esc(t.name)}</td><td class="num ${tone(t.d)}">${t.d > 0 ? "+" : ""}${fmt(t.d,2)}</td></tr>`).join("")}</tbody></table>
+    <p class="hint" style="margin-top:6px">正值代表成功的突破在這項指標的全市場排名明顯偏高，負值代表偏低。</p>` : `<span class="muted">沒有明顯不同的特徵。</span>`;
+  const om = bo.optimization?.modes?.[BO.mode];
+  $("boOpt").innerHTML = om && (om.grid || []).length ? `<table class="mq"><thead><tr><th>觀察期</th><th>提升倍數</th><th>報酬差</th><th>驗證</th></tr></thead><tbody>
+    ${om.grid.map(g => `<tr${g.L === om.best ? ' class="best"' : ""}><td class="num">${g.L === om.best ? "<b>" + g.L + " 日</b>" : g.L + " 日"}</td><td class="num">${fmt(g.lift,2)}</td><td class="num ${tone(g.excess)}">${g.excess > 0 ? "+" : ""}${fmt(g.excess,2)}%</td><td><span class="pill ${g.valid ? "ok2" : "ng"}">${g.valid ? "通過" : "未通過"}</span></td></tr>`).join("")}</tbody></table>
+    <p class="hint" style="margin-top:6px">資料截至 ${esc(bo.optimization.quarter)} 季底。${om.honest ? `誠實檢驗（每年只用之前年度最好的觀察期）：提升 ${fmt(om.honest.lift,2)} 倍、報酬差 ${om.honest.excess > 0 ? "+" : ""}${fmt(om.honest.excess,2)}%，<span class="pill ${om.honest.valid ? "ok2" : "ng"}">${om.honest.valid ? "通過" : "未通過"}</span>。` : ""}</p>`
+    : `<span class="muted">尚未最佳化。</span>`;
+}
+["boRows", "boNear"].forEach(id => {
+  $(id).addEventListener("click", async e => {
+    const st = e.target.closest("[data-star]"); if (st){ e.stopPropagation(); await wlToggle(st.dataset.star); return; }
+    const tr = e.target.closest("tr[data-c]"); if (tr) openStock(tr.dataset.c);
+  });
+  $(id).addEventListener("keydown", e => { const tr = e.target.closest("tr[data-c]"); if (tr && e.target === tr && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openStock(tr.dataset.c); }});
+});
 
 // ---------- watchlist (saved to the viewer's account via db; this browser as fallback) ----------
 const WL = {items: [], ref: null, chain: Promise.resolve()};

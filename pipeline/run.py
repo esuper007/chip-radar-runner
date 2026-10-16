@@ -134,7 +134,13 @@ def cmd_build(a):
     except Exception:
         log.exception("surge similarity failed")
         sg = None
-    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg)
+    from . import breakout
+    try:
+        bo = breakout.compute(fs, scores, st)
+    except Exception:
+        log.exception("breakout analysis failed")
+        bo = None
+    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg, bo)
     log.info("build done: %s", res)
 
 
