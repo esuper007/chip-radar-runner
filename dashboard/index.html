@@ -165,6 +165,7 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
 .pill.ok2{color:var(--up-c)}
 .sv{font-family:var(--f-num);font-weight:600}
 .trait{font-size:11px;padding:1px 6px;border-radius:3px;background:var(--sunk);white-space:nowrap}
+.trait.ok{background:var(--accent-soft);color:var(--accent);font-weight:600}
 .cf-fields{display:grid;gap:10px}
 .cf-fields label{display:grid;grid-template-columns:1fr 6em;gap:8px;align-items:center;font-size:13.5px}
 .cf-fields input{border:1px solid var(--line);background:var(--surface);border-radius:4px;padding:5px 8px;font-family:var(--f-num);text-align:right}
@@ -258,17 +259,19 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <p class="hint" id="boStatus" style="margin:0 0 10px"></p>
     <h2 style="font-size:14px;margin:6px 0">最近 5 個交易日剛突破</h2>
     <div class="scroll"><table class="grid"><thead><tr>
-      <th class="l">代號</th><th class="l">名稱</th><th>收盤</th><th>突破</th><th>籌碼分數</th><th title="這次突破的籌碼樣貌，在歷史所有突破中的排名（100 最像成功的突破）">成功樣貌排名</th><th title="歷史上同一排名區間（五等分）的突破，實際達成成功標準的比例">歷史成功率</th><th class="l">主要加分特徵</th><th></th>
+      <th class="l">代號</th><th class="l">名稱</th><th>收盤</th><th>突破</th><th>籌碼分數</th><th title="LightGBM 突破模型（籌碼＋價量＋大盤）：歷史上同一分數區間的突破實際成功的比例／所有突破平均；括號內為分數排名">模型成功率</th><th class="l" title="符合的價量規則中，逐年驗證有效的那幾條">有效型態</th><th title="籌碼樣貌在歷史突破中的排名，與同排名區間的實際成功率">籌碼樣貌</th><th class="l">籌碼加分特徵</th><th></th>
     </tr></thead><tbody id="boRows"></tbody></table></div>
     <h2 style="font-size:14px;margin:14px 0 6px">距一年高點 3% 以內（尚未突破）</h2>
     <div class="scroll"><table class="grid"><thead><tr>
-      <th class="l">代號</th><th class="l">名稱</th><th>收盤</th><th>距高點</th><th>籌碼分數</th><th>成功樣貌排名</th><th>歷史成功率</th><th class="l">主要加分特徵</th><th></th>
+      <th class="l">代號</th><th class="l">名稱</th><th>收盤</th><th>距高點</th><th>籌碼分數</th><th title="LightGBM 突破模型（籌碼＋價量＋大盤）：歷史上同一分數區間的突破實際成功的比例／所有突破平均；括號內為分數排名">模型成功率</th><th class="l">有效型態</th><th>籌碼樣貌</th><th class="l">籌碼加分特徵</th><th></th>
     </tr></thead><tbody id="boNear"></tbody></table></div>
     <div class="pager"><span id="boInfo" class="muted"></span><button class="btn" id="boMore">顯示更多</button></div>
     <div class="dq" style="margin-top:12px">
       <div><h2>歷史驗證（逐年往前，不使用未來資料）</h2><div class="scroll" id="boVal"></div></div>
       <div><h2>成功突破和失敗突破最不同的籌碼特徵</h2><div id="boTraits" class="scroll"></div></div>
       <div><h2>觀察期長度最佳化（每季底重新計算）</h2><div id="boOpt" class="scroll"></div></div>
+      <div><h2>LightGBM 突破模型（逐年往前驗證）</h2><div id="boMl" class="scroll"></div></div>
+      <div><h2>價量規則逐年驗證</h2><div id="boRules" class="scroll"></div></div>
     </div>
     <p class="hint">做法：收盤價創下前 250 個交易日的新高、且前 60 日內沒創過新高（整理後的第一次突破）視為一次「突破」。成功標準有兩種：突破後半年（126 個交易日）報酬落在同日全市場前 10%，或突破後一年（252 個交易日）報酬落在前 20%。觀察突破前 L 日的籌碼：突破前半年（123 日）平均、更早的前段平均（L &gt; 123 時）、兩段的變化，以及突破前 20 日；L 由系統每季在 123、189、255 日中挑選。拿「成功的突破」和「所有突破」比較，找出成功突破明顯不同的籌碼特徵並加權。驗證時只用之前已知結果的突破建立樣貌，檢查每年排名前 20% 的突破成功率是否高於當年所有突破；提升倍數 ≥ 1.3 且報酬優於所有突破平均才標示「有效」。「歷史成功率」來自逐年驗證中同一排名區間的實際結果。這些是機率，不保證個股會上漲。</p>
   </section>
@@ -760,13 +763,25 @@ try { const m = localStorage.getItem("boMode"); if (m === "h126q10" || m === "h2
 $("boModes").addEventListener("click", e => { const b = e.target.closest("[data-bo]"); if (!b) return;
   BO.mode = b.dataset.bo; try { localStorage.setItem("boMode", BO.mode); } catch (e) {} renderBreakout(); });
 $("boMore").onclick = () => { BO.shown += 30; renderBreakout(); };
-function boRow(r, x, m, kind){
-  const v = x[BO.mode] || {};
+const BO_RULES = {tight: "波動收斂", higher_low: "低點墊高", vol_surge: "突破放量", accum: "量能累積", rs70: "一年強勢",
+  trend: "趨勢模板", regime: "大盤多頭", breadth: "廣度佳", peers: "同產業齊漲"};
+// a rule counts as effective when it beat "not met" in at least 65% of tested years, by 5%+ on average,
+// and it actually separates breakouts (met by at most 90% of them)
+function boEffective(rule){
+  return !!rule && rule.years >= 5 && rule.years_better / rule.years >= 0.65 && rule.yes?.rate != null && rule.no?.rate != null
+    && rule.yes.rate > rule.no.rate * 1.05 && rule.share <= 0.9;
+}
+function boRow(r, x, m, kind, ctx){
+  const v = x[BO.mode] || {}, ml = x.ml?.[BO.mode], mv = ctx.mlv;
+  const tags = Object.entries(x.f || {}).filter(([k, on]) => on && ctx.eff.has(k)).map(([k]) => `<span class="trait ok">${esc(BO_RULES[k] || k)}</span>`).join(" ");
+  const mlCell = ml && ml.sr != null
+    ? `<span class="${mv?.valid ? "" : "muted"}"><b>${pct(ml.sr)}</b>／${pct(mv?.base_rate)}</span> <span class="muted">(${fmt(ml.p,0)})</span>` : "—";
   return `<tr data-c="${esc(r.c)}" tabindex="0"><td class="l num">${esc(r.c)}</td><td class="l">${esc(r.n)}</td><td class="num">${fmt(r.px,2)}</td>
     <td class="num">${kind === "near" ? "−" + fmt(x.g,1) + "%" : x.d === 0 ? "今天" : x.d + " 日前"}</td>
     <td><span class="score"><span class="meter"><i style="width:${r.sc}%"></i></span><b>${fmt(r.sc,1)}</b></span></td>
-    <td><span class="sv">${v.p != null ? fmt(v.p,0) : "—"}</span></td>
-    <td class="num">${v.sr != null ? `<b>${pct(v.sr)}</b> <span class="muted">／${pct(m.validation?.base_rate)}</span>` : "—"}</td>
+    <td class="num">${mlCell}</td>
+    <td class="l wrapc">${tags || '<span class="muted">—</span>'}</td>
+    <td class="num">${v.sr != null ? `${pct(v.sr)} <span class="muted">(${fmt(v.p,0)})</span>` : "—"}</td>
     <td class="l wrapc">${(v.m||[]).map(t => `<span class="trait">${esc(t)}</span>`).join(" ")}</td>
     <td><button class="star ${wlHas(r.c)?"on":""}" data-star="${esc(r.c)}" aria-label="${wlHas(r.c)?"移出":"加入"}觀察清單：${esc(r.n)}">${wlHas(r.c)?"★":"☆"}</button></td></tr>`;
 }
@@ -775,13 +790,30 @@ function renderBreakout(){
   const bo = S.summary[S.market]?.breakout || {}, m = (bo.modes || {})[BO.mode] || {}, v = m.validation || {};
   const sc = S.screen[S.market], byC = new Map((sc?.rows || []).map(r => [r.c, r]));
   $("boStatus").innerHTML = bo.status === "ok" && m.status === "ok"
-    ? `觀察期 ${m.L} 日。歷史共 ${fmt(bo.n_events,0)} 次突破，其中達成「${esc(m.name)}」的比例為 ${pct(m.base_rate_all)}（一般股票為 ${pct(m.q)}）。驗證：<span class="pill ${m.valid ? "ok2" : "ng"}">${m.valid ? "有效" : "未通過"}</span> 籌碼樣貌排名前 20% 的突破成功率 ${v.top_rate != null ? pct(v.top_rate) : "—"}，所有突破 ${v.base_rate != null ? pct(v.base_rate) : "—"}（提升 ${v.lift != null ? fmt(v.lift,2) + " 倍" : "—"}）。`
+    ? `觀察期 ${m.L} 日。歷史共 ${fmt(bo.n_events,0)} 次突破，其中達成「${esc(m.name)}」的比例為 ${pct(m.base_rate_all)}（一般股票為 ${pct(m.q)}）。${bo.ml?.[BO.mode]?.valid ? `<span class="pill ok2">LightGBM 模型通過</span>，名單依模型成功率排序。` : ""}籌碼樣貌驗證：<span class="pill ${m.valid ? "ok2" : "ng"}">${m.valid ? "有效" : "未通過"}</span> 籌碼樣貌排名前 20% 的突破成功率 ${v.top_rate != null ? pct(v.top_rate) : "—"}，所有突破 ${v.base_rate != null ? pct(v.base_rate) : "—"}（提升 ${v.lift != null ? fmt(v.lift,2) + " 倍" : "—"}）。`
     : bo.status === "insufficient" || m.status === "insufficient" ? `這個市場的籌碼歷史還不夠長（需要約 2 年），暫時無法分析。` : `尚未計算，下次資料更新後出現。`;
-  const today = (bo.today || []).filter(x => byC.has(x.c)), key = x => x[BO.mode]?.p ?? -1;
+  const mlv = bo.ml?.[BO.mode]?.validation, rules = bo.patterns?.modes?.[BO.mode]?.rules || {};
+  const ctx = {mlv: mlv ? {...mlv, valid: bo.ml[BO.mode].valid} : null, eff: new Set(Object.keys(rules).filter(k => boEffective(rules[k])))};
+  // sort: by the LightGBM model when it passed validation, otherwise by number of effective rules, then chip rank
+  const nEff = x => Object.entries(x.f || {}).filter(([k, on]) => on && ctx.eff.has(k)).length;
+  const key = ctx.mlv?.valid ? (x => x.ml?.[BO.mode]?.p ?? -1) : (x => nEff(x) * 1000 + (x[BO.mode]?.p ?? 0));
+  const today = (bo.today || []).filter(x => byC.has(x.c));
   const brk = today.filter(x => x.d >= 0).sort((a,b) => key(b) - key(a)), near = today.filter(x => x.d < 0).sort((a,b) => key(b) - key(a));
-  const empty = (msg) => `<tr><td colspan="9" class="empty">${msg}</td></tr>`;
-  $("boRows").innerHTML = brk.length ? brk.slice(0, BO.shown).map(x => boRow(byC.get(x.c), x, m, "brk")).join("") : empty("最近 5 個交易日沒有符合條件的突破。");
-  $("boNear").innerHTML = near.length ? near.slice(0, BO.shown).map(x => boRow(byC.get(x.c), x, m, "near")).join("") : empty("目前沒有接近一年高點的股票。");
+  const empty = (msg) => `<tr><td colspan="10" class="empty">${msg}</td></tr>`;
+  const mlo = bo.ml?.[BO.mode];
+  $("boMl").innerHTML = mlo && mlv?.n_years ? `<p style="margin:0 0 6px"><span class="pill ${mlo.valid ? "ok2" : "ng"}">${mlo.valid ? "通過" : "未通過"}</span>
+    分數前 20% 的突破成功率 <b>${pct(mlv.top_rate)}</b>，所有突破 ${pct(mlv.base_rate)}（提升 ${fmt(mlv.lift,2)} 倍，報酬差 ${mlv.excess > 0 ? "+" : ""}${fmt(mlv.excess,2)}%），${mlv.years_better}/${mlv.n_years} 年優於平均。${ctx.mlv?.valid ? "名單依模型排序。" : "未通過時名單依有效型態數排序，模型成功率以灰色顯示僅供參考。"}</p>
+    ${(mlv.quintiles || []).length ? `<p class="hint" style="margin:0 0 6px">依模型分數五等分的成功率（低→高）：${mlv.quintiles.map(q => q == null ? "—" : pct(q)).join("、")}</p>` : ""}
+    ${(mlo.importance || []).length ? `<table class="mq"><thead><tr><th>影響最大的因素</th><th>重要度 %</th></tr></thead><tbody>${mlo.importance.slice(0, 8).map(i => `<tr><td>${esc(i.name)}</td><td class="num">${fmt(i.gain,1)}</td></tr>`).join("")}</tbody></table>` : ""}`
+    : `<span class="muted">尚無模型結果。</span>`;
+  const rk = Object.keys(rules);
+  $("boRules").innerHTML = rk.length ? `<table class="mq"><thead><tr><th>規則</th><th>符合</th><th>不符合</th><th>符合比例</th><th>逐年較好</th><th></th></tr></thead><tbody>
+    ${rk.map(k => { const x = rules[k], e = ctx.eff.has(k);
+      return `<tr${e ? ' class="best"' : ""}><td>${esc(BO_RULES[k] || k)}</td><td class="num">${x.yes?.rate != null ? pct(x.yes.rate) : "—"}</td><td class="num muted">${x.no?.rate != null ? pct(x.no.rate) : "—"}</td><td class="num">${pct(x.share)}</td><td class="num">${x.years_better}/${x.years}</td><td>${e ? '<span class="pill ok2">有效</span>' : ""}</td></tr>`; }).join("")}</tbody></table>
+    <p class="hint" style="margin-top:6px">「有效」：至少 5 個年度中有 65% 以上的年份，符合規則的突破成功率高於不符合者，平均高出 5% 以上，且不是幾乎所有突破都符合（≤ 90%）。規則定義：${Object.entries(bo.patterns?.defs || {}).map(([k, d]) => `${esc(BO_RULES[k] || k)}＝${esc(d)}`).join("；")}。</p>`
+    : `<span class="muted">尚無規則驗證結果。</span>`;
+  $("boRows").innerHTML = brk.length ? brk.slice(0, BO.shown).map(x => boRow(byC.get(x.c), x, m, "brk", ctx)).join("") : empty("最近 5 個交易日沒有符合條件的突破。");
+  $("boNear").innerHTML = near.length ? near.slice(0, BO.shown).map(x => boRow(byC.get(x.c), x, m, "near", ctx)).join("") : empty("目前沒有接近一年高點的股票。");
   $("boInfo").textContent = today.length ? `剛突破 ${brk.length} 檔、接近高點 ${near.length} 檔` : "";
   $("boMore").hidden = Math.max(brk.length, near.length) <= BO.shown;
   $("boVal").innerHTML = (v.per_year || []).length ? `<table class="mq"><thead><tr><th>年度</th><th>突破次數</th><th>前 20% 成功率</th><th>所有突破</th><th>報酬差</th></tr></thead><tbody>
