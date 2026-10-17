@@ -521,23 +521,39 @@ def fetch_taifex(start: dt.date, end: dt.date) -> pd.DataFrame:
     return df.sort_values("date")
 
 
-def update_taifex(store: Store) -> None:
-    """Incremental, one month per request; the first run goes back about 3 years (what TAIFEX serves)."""
-    have = store.dates("taifex")
+def update_taifex(store: Store, max_months: int = 6) -> None:
+    """Fill any month in the last ~3 years that has no data yet (the site rate-limits, so at most
+    `max_months` per run, oldest gaps first, with a pause between requests); the current month is
+    always refreshed."""
+    import time
+    have: dict[tuple[int, int], int] = {}
+    for d in store.dates("taifex"):
+        have[(d.year, d.month)] = have.get((d.year, d.month), 0) + 1
     today = dt.date.today()
-    start = (max(have) + dt.timedelta(days=1)) if have else today - dt.timedelta(days=3 * 365)
+    first = (today - dt.timedelta(days=3 * 365)).replace(day=1)
+    months, m = [], first
+    while m <= today:
+        months.append(m)
+        m = (m + dt.timedelta(days=32)).replace(day=1)
+    cur = (today.year, today.month)
+    todo = [m for m in months if (m.year, m.month) != cur and have.get((m.year, m.month), 0) < 12][:max_months]
+    todo.append(today.replace(day=1))
     n = 0
-    while start <= today:
-        end = min(today, (start.replace(day=1) + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1))
+    for k, m in enumerate(todo):
+        end = min(today, (m + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1))
+        if k:
+            time.sleep(8)
         try:
-            df = fetch_taifex(start, end)
+            df = fetch_taifex(m, end)
             if not df.empty:
                 store.append("taifex", df)
                 n += len(df)
         except Exception as e:
-            log.warning("taifex %s..%s: %s", start, end, e)
-        start = end + dt.timedelta(days=1)
-    log.info("taifex: %d new days", n)
+            log.warning("taifex %s: %s", m.strftime("%Y-%m"), e)
+            if "429" in str(e):
+                break
+    missing = sum(1 for m in months if (m.year, m.month) != cur and have.get((m.year, m.month), 0) < 12) - len(todo) + 1
+    log.info("taifex: %d new days; %d older months still to fill", n, max(0, missing))
 
 
 def update_weekly_monthly(store: Store) -> None:

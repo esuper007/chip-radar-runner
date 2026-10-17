@@ -139,7 +139,7 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
     mkt = {}
     for nm, ser in fs.market_series.items():
         ser = ser.sort_index()
-        if "買賣超" in nm or "淨" in nm or "净" in nm or "流入" in nm:     # daily flows: show 20-day running total
+        if ("買賣超" in nm or "淨" in nm or "净" in nm or "流入" in nm) and "未平倉" not in nm:   # daily flows: 20-day total
             ser = ser.rolling(20, min_periods=5).sum()
             nm = nm.replace(")", "，20日累計)") if ")" in nm else nm + "(20日累計)"
         ser = ser.reindex(mwin).dropna()

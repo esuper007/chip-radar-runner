@@ -42,7 +42,7 @@ _session = requests.Session()
 _last_call: dict[str, float] = {}
 
 # Minimum seconds between calls per host (TWSE bans IPs that exceed ~3 req / 5 s).
-HOST_GAP = {
+HOST_GAP = {"www.taifex.com.tw": 5.0, 
     "www.twse.com.tw": 3.2,
     "www.tpex.org.tw": 2.0,
     "openapi.twse.com.tw": 1.0,
