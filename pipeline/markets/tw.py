@@ -19,7 +19,7 @@ import re
 
 import pandas as pd
 
-from ..common import http_json, http_bytes, log, log_fields_once, num, read_csv_bytes, record_check, roc_to_date, ymd
+from ..common import http_get, http_json, http_bytes, log, log_fields_once, num, read_csv_bytes, record_check, roc_to_date, ymd
 from ..store import Store
 
 MARKET = "tw"

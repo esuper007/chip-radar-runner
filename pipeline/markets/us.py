@@ -277,6 +277,29 @@ def fetch_ftd(year: int, month: int, half: str) -> pd.DataFrame:
     return df.dropna(subset=["date"])[["date", "code", "cusip", "fails"]]
 
 
+def _available(df: pd.DataFrame, kind: str) -> pd.DataFrame:
+    """Re-date rows to when the data became public (avoids look-ahead in backtests and models).
+    si:      FINRA short interest is published ~7 business days after the settlement date -> +8 business days.
+    ftd:     SEC fails-to-deliver: days 1-15 are published at month end, days 16-end around the 15th of the
+             next month; rows are summed per release.
+    insider: bulk Form 4 data is stamped with the transaction date; filings are due within 2 business days."""
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    d = pd.to_datetime(df["date"])
+    if kind == "si":
+        df["date"] = d + pd.offsets.BDay(8)
+    elif kind == "insider":
+        df["date"] = d + pd.offsets.BDay(2)
+    elif kind == "ftd":
+        me = d + pd.offsets.MonthEnd(0)
+        avail = me + pd.Timedelta(days=1)
+        avail = avail.where(d.dt.day <= 15, me + pd.Timedelta(days=16))
+        df["date"] = avail
+        df = df.groupby(["date", "code"], as_index=False)["fails"].sum()
+    return df
+
+
 def fetch_13f(year: int, quarter: int) -> pd.DataFrame:
     """SEC Form 13F data set -> shares held per CUSIP + number of managers, for one report quarter.
 
@@ -478,6 +501,10 @@ def build_factors(store: Store, since: str = "2014-01-01"):
     ins = store.load("insider", s)
     act = store.load("activist", s)
     ftd = store.load("ftd", s)
+    # --- point-in-time: data only counts from the day it was actually public ---
+    si = _available(si, "si")
+    ftd_pub = _available(ftd, "ftd")      # ftd itself is kept for the CUSIP -> ticker map
+    ins = _available(ins, "insider")
     f13 = store.load("inst13f", s)
     uni = store.load("universe")
     shr = store.load("shares")
@@ -516,7 +543,8 @@ def build_factors(store: Store, since: str = "2014-01-01"):
         f["short_interest_dtc"] = si_w / (rsum(vol, 20) / 20).where(lambda x: x > 0)
     # fails to deliver
     if not ftd.empty:
-        f["ftd_pct_20"] = rsum(W(ftd, "fails"), 20) / sh * 100
+        # one value per SEC release (half-month total), carried until the next release
+        f["ftd_pct_20"] = W(ftd_pub, "fails", 12) / sh * 100
     # insiders (90-day window)
     if not ins.empty:
         bv = since_start(W(ins, "ins_buy_value").fillna(0), ins)
@@ -570,7 +598,7 @@ def build_factors(store: Store, since: str = "2014-01-01"):
 LABELS = {
     "short_vol_ratio_20": "場外放空量比%(20日)", "short_vol_ratio_chg": "放空量比20日變化(pp)",
     "short_interest_pct": "空單佔流通股%", "short_interest_chg": "空單半月變化%", "short_interest_dtc": "回補天數",
-    "ftd_pct_20": "交割失敗佔股本%(20日)", "insider_net_buy_90": "內部人90日淨買(市值bp)",
+    "ftd_pct_20": "交割失敗佔股本%(最近半月)", "insider_net_buy_90": "內部人90日淨買(市值bp)",
     "insider_buyers_90": "內部人90日買進人次", "insider_net_chg": "內部人淨買(市值%)",
     "activist_13d_90": "90日內13D申報數", "inst_own_pct": "13F機構持股%", "inst_own_chg_q": "13F機構持股季變化%",
     "inst_holders_chg_q": "13F持有機構數季變化%", "ret_20": "20日漲跌%", "ret_60": "60日漲跌%",
