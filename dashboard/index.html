@@ -283,6 +283,13 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <p class="hint">系統每天收盤後把當天的排行榜、起漲訊號、突破名單存檔，之後依實際股價計算 20、63、126 個交易日後的報酬。「超額」是和同期全市場（流動性足夠的股票）等權平均相比；「勝率」是超額報酬為正的比例。這是上線後的真實紀錄，不是回測，也不計交易成本。名單要經過對應天數才會有結果。</p>
   </section>
 
+  <section class="panel" aria-label="籌碼因子體檢">
+    <div class="sec-head"><h2>籌碼因子體檢：每個指標實際上有沒有預測力</h2></div>
+    <p class="hint" id="hlStatus" style="margin:0 0 10px"></p>
+    <div class="scroll" id="hlTable"></div>
+    <p class="hint">每個籌碼因子先扣除產業與市值（成交金額）的影響，再看它和之後 5、20、60 個交易日超額報酬的排序相關（IC，正值代表有預測力，0.02–0.05 已屬有用）。IR 是 20 日 IC 的穩定度；正向年數是 IC 為正的年份；五等分報酬差是因子最好 20% 減最差 20% 的 20 日超額報酬；換手是 20 日後排名的變動程度。綜合籌碼分數的權重由系統每季依過去 3 年的 IR 自動決定（只用當時已知的結果），表現轉差的因子權重歸零。不計交易成本。</p>
+  </section>
+
   <section class="pulse" id="pulse" aria-label="市場籌碼概況"></section>
 
   <section class="panel" aria-label="預測模型可信度">
@@ -382,7 +389,7 @@ async function loadMarket(){
     renderSummary();
     if (!S.screen[m]) S.screen[m] = await getJSON(dataUrl("screen"));
     if (m !== S.market) return;
-    buildFilters(); renderRows(); renderRank(); renderSignals(); renderBreakout(); renderTrack(); renderWatch();
+    buildFilters(); renderRows(); renderRank(); renderSignals(); renderBreakout(); renderTrack(); renderHealth(); renderWatch();
   }catch(e){
     if (m !== S.market) return;
     if (!(e && e.status)) console.error("render failed", e);
@@ -763,6 +770,22 @@ $("bsRows").addEventListener("click", async e => {
   const tr = e.target.closest("tr[data-c]"); if (tr) openStock(tr.dataset.c);
 });
 $("bsRows").addEventListener("keydown", e => { const tr = e.target.closest("tr[data-c]"); if (tr && e.target === tr && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openStock(tr.dataset.c); }});
+
+// ---------- factor health ----------
+function renderHealth(){
+  const sm = S.summary[S.market] || {}, hl = sm.health || {}, F = hl.factors || {};
+  const ks = Object.keys(F).sort((a, b) => (F[b].weight ?? -1) - (F[a].weight ?? -1) || (F[b].ir20 ?? -9) - (F[a].ir20 ?? -9));
+  const by = {industry: "產業", size: "市值"};
+  $("hlStatus").textContent = ks.length ? `共 ${ks.length} 個因子；已扣除${(hl.neutralized_by || []).map(x => by[x] || x).join("、") || "（無）"}的影響。自動權重自 ${hl.weights_from || "—"} 起生效。` : "尚未計算，下次資料更新後出現。";
+  if (!ks.length){ $("hlTable").innerHTML = ""; return; }
+  const ic = v => v == null ? "—" : `<span class="${v > 0.02 ? "up" : v < -0.01 ? "down" : ""}">${fmt(v, 3)}</span>`;
+  $("hlTable").innerHTML = `<table class="mq"><thead><tr><th>因子</th><th>面向</th><th>IC 5日</th><th>IC 20日</th><th>IC 60日</th><th>IR</th><th>正向年數</th><th>五等分報酬差</th><th>換手</th><th>目前權重</th></tr></thead><tbody>
+    ${ks.map(k => { const f = F[k]; return `<tr${(f.weight || 0) > 0 ? "" : ' class="muted"'}><td>${esc(f.label || k)}${f.sign < 0 ? ' <span class="muted">（反向）</span>' : ""}</td><td>${esc(GROUPS[f.group] || f.group)}</td>
+      <td class="num">${ic(f.ic5)}</td><td class="num">${ic(f.ic20)}</td><td class="num">${ic(f.ic60)}</td><td class="num">${f.ir20 == null ? "—" : fmt(f.ir20,2)}</td>
+      <td class="num">${f.years ? `${f.pos_years}/${f.years}` : "—"}</td><td class="num ${tone(f.q_spread20)}">${f.q_spread20 == null ? "—" : (f.q_spread20 > 0 ? "+" : "") + fmt(f.q_spread20,2) + "%"}</td>
+      <td class="num">${f.turnover == null ? "—" : pct(f.turnover)}</td><td class="num"><b>${f.weight == null ? "—" : fmt(f.weight,1) + "%"}</b></td></tr>`; }).join("")}
+    </tbody></table>`;
+}
 
 // ---------- live track record ----------
 function renderTrack(){

@@ -90,6 +90,14 @@ def cmd_build(a):
     fs = m.build_factors(st)
     log.info("factors: %d days x %d codes, %d factors", len(fs.calendar), len(fs.codes), len(fs.factors))
     scores = compute_scores(fs)
+    from . import health
+    hres = None
+    try:
+        # factor health + composite from industry/size-neutral ranks with quarterly IC weights (no look-ahead)
+        hres = health.compute(fs, st)
+        scores["score"] = health.weighted_score(fs, hres, scores["score"])
+    except Exception:
+        log.exception("factor health failed; keeping the equal-weight score")
 
     out_dir = Path("dist") / a.market
     metrics_path = out_dir / "metrics.json"
@@ -143,7 +151,12 @@ def cmd_build(a):
         st.push()                      # keep the day's picks even if publishing fails later
     except Exception:
         log.exception("track record failed")
-    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg, bo, trk)
+    hsum = None
+    if hres:
+        wts = hres["weights"].dropna(how="all")
+        hsum = {"factors": hres["factors"], "neutralized_by": hres["neutralized_by"],
+                "weights_from": str(wts.index.min().date()) if len(wts) else None}
+    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg, bo, trk, hsum)
     log.info("build done: %s", res)
 
 
