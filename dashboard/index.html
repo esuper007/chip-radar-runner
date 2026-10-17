@@ -276,6 +276,13 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <p class="hint">做法：收盤價創下前 250 個交易日的新高、且前 60 日內沒創過新高（整理後的第一次突破）視為一次「突破」。成功標準有兩種：突破後半年（126 個交易日）報酬落在同日全市場前 10%，或突破後一年（252 個交易日）報酬落在前 20%。觀察突破前 L 日的籌碼：突破前半年（123 日）平均、更早的前段平均（L &gt; 123 時）、兩段的變化，以及突破前 20 日；L 由系統每季在 123、189、255 日中挑選。拿「成功的突破」和「所有突破」比較，找出成功突破明顯不同的籌碼特徵並加權。驗證時只用之前已知結果的突破建立樣貌，檢查每年排名前 20% 的突破成功率是否高於當年所有突破；提升倍數 ≥ 1.3 且報酬優於所有突破平均才標示「有效」。「歷史成功率」來自逐年驗證中同一排名區間的實際結果。這些是機率，不保證個股會上漲。</p>
   </section>
 
+  <section class="panel" aria-label="實戰成績單">
+    <div class="sec-head"><h2>實戰成績單：每天的名單，後來真的表現如何</h2></div>
+    <p class="hint" id="trkStatus" style="margin:0 0 10px"></p>
+    <div class="scroll" id="trkTable"></div>
+    <p class="hint">系統每天收盤後把當天的排行榜、起漲訊號、突破名單存檔，之後依實際股價計算 20、63、126 個交易日後的報酬。「超額」是和同期全市場（流動性足夠的股票）等權平均相比；「勝率」是超額報酬為正的比例。這是上線後的真實紀錄，不是回測，也不計交易成本。名單要經過對應天數才會有結果。</p>
+  </section>
+
   <section class="pulse" id="pulse" aria-label="市場籌碼概況"></section>
 
   <section class="panel" aria-label="預測模型可信度">
@@ -375,7 +382,7 @@ async function loadMarket(){
     renderSummary();
     if (!S.screen[m]) S.screen[m] = await getJSON(dataUrl("screen"));
     if (m !== S.market) return;
-    buildFilters(); renderRows(); renderRank(); renderSignals(); renderBreakout(); renderWatch();
+    buildFilters(); renderRows(); renderRank(); renderSignals(); renderBreakout(); renderTrack(); renderWatch();
   }catch(e){
     if (m !== S.market) return;
     if (!(e && e.status)) console.error("render failed", e);
@@ -756,6 +763,21 @@ $("bsRows").addEventListener("click", async e => {
   const tr = e.target.closest("tr[data-c]"); if (tr) openStock(tr.dataset.c);
 });
 $("bsRows").addEventListener("keydown", e => { const tr = e.target.closest("tr[data-c]"); if (tr && e.target === tr && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openStock(tr.dataset.c); }});
+
+// ---------- live track record ----------
+function renderTrack(){
+  const tk = S.summary[S.market]?.track || {}, lists = tk.lists || {};
+  const order = ["up_1q", "gain_1q", "up_1y", "down_1q", "bo_top", "bo"];
+  const keys = Object.keys(lists).sort((a, b) => (order.indexOf(a) < 0 ? 99 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 99 : order.indexOf(b)) || a.localeCompare(b));
+  $("trkStatus").textContent = tk.since ? `自 ${tk.since} 開始記錄，已累積 ${fmt(tk.days,0)} 個交易日。` : "尚未開始記錄，下次資料更新後開始。";
+  if (!keys.length){ $("trkTable").innerHTML = ""; return; }
+  const cell = x => !x || !x.n ? `<td class="num muted" colspan="3">累積中</td>`
+    : `<td class="num">${x.ret > 0 ? "+" : ""}${fmt(x.ret,2)}%</td><td class="num ${tone(x.excess)}"><b>${x.excess > 0 ? "+" : ""}${fmt(x.excess,2)}%</b></td><td class="num">${pct(x.hit)} <span class="muted">(${fmt(x.n,0)})</span></td>`;
+  $("trkTable").innerHTML = `<table class="mq"><thead><tr><th>名單</th><th>天數</th><th>檔次</th>
+    ${["20","63","126"].map(h => `<th colspan="3">${h} 日後：報酬／超額／勝率</th>`).join("")}</tr></thead><tbody>
+    ${keys.map(k => { const v = lists[k]; return `<tr><td>${esc(v.name)}</td><td class="num">${fmt(v.days,0)}</td><td class="num">${fmt(v.picks,0)}</td>${["20","63","126"].map(h => cell(v.h?.[h])).join("")}</tr>`; }).join("")}
+    </tbody></table>`;
+}
 
 // ---------- breakout to a 1-year high ----------
 const BO = {mode: "h126q10", shown: 30};

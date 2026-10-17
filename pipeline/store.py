@@ -66,7 +66,8 @@ class Store:
                 if r.returncode == 0 and remote.exists() and mine:
                     try:
                         both = pd.concat([pd.read_parquet(remote), *mine], ignore_index=True)
-                        keys = [k for k in ("date", "code", "cik", "cusip") if k in both.columns][:2]
+                        keys = [k for k in ("date", "code", "cik", "cusip") if k in both.columns][:2] + \
+                            (["list"] if "list" in both.columns else [])
                         both = both.drop_duplicates(keys, keep="last").sort_values(keys)
                         both.to_parquet(p, index=False, compression="zstd")
                     except Exception as e:

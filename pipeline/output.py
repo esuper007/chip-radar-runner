@@ -72,7 +72,8 @@ def _model_labels(fs: FactorSet) -> dict:
 
 def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics: dict,
           freshness: dict, key_factors: list[str], quality: dict | None = None, sig: dict | None = None,
-          surge: dict | None = None, breakout: dict | None = None) -> dict:
+          surge: dict | None = None, breakout: dict | None = None,
+          track: dict | None = None) -> dict:
     out_dir = DIST / fs.market
     t = fs.calendar[-1]
     sc = {k: v.loc[t] for k, v in scores.items()}
@@ -155,6 +156,7 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
         "signals": (sig or {}).get("stats", {}),
         "surge": {k: v for k, v in (surge or {}).items() if k != "today"},
         "breakout": breakout or {},
+        "track": track or {},
     }
     _dump(out_dir / "summary.js", summary)
     return {"rows": len(rows), "asof": str(t.date())}

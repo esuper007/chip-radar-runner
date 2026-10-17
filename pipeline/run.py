@@ -135,7 +135,15 @@ def cmd_build(a):
     except Exception:
         log.exception("breakout analysis failed")
         bo = None
-    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg, bo)
+    from . import track
+    trk = None
+    try:
+        track.record(st, fs, fc, sig, bo)
+        trk = track.evaluate(st, fs, {k: v.get("name") for k, v in ((sig or {}).get("stats") or {}).items()})
+        st.push()                      # keep the day's picks even if publishing fails later
+    except Exception:
+        log.exception("track record failed")
+    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg, bo, trk)
     log.info("build done: %s", res)
 
 
