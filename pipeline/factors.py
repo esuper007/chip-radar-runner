@@ -155,9 +155,16 @@ def xrank(w: pd.DataFrame, mask: pd.DataFrame | None = None) -> pd.DataFrame:
     return w.rank(axis=1, pct=True)
 
 
+def alive(fs: FactorSet) -> pd.DataFrame:
+    """Stocks that traded in the last 5 sessions. Delisted stocks stay in the data for the backtests, but
+    must not be ranked (or shown) after they stopped trading."""
+    return fs.price.notna().rolling(5, min_periods=1).max().astype(bool)
+
+
 def compute_scores(fs: FactorSet) -> dict[str, pd.DataFrame]:
     """Sub-scores (0-100) per group and weighted composite `score`."""
     out = {}
+    live = alive(fs)
     num = None
     den = None
     for g, items in fs.score_spec.items():
@@ -165,7 +172,7 @@ def compute_scores(fs: FactorSet) -> dict[str, pd.DataFrame]:
         for name, sign in items:
             if name not in fs.factors:
                 continue
-            rk = xrank(fs.factors[name] * sign)       # rank every stock; the page filters by liquidity
+            rk = xrank(fs.factors[name] * sign, live)  # rank every trading stock; the page filters by liquidity
             parts.append(rk)
         if not parts:
             continue

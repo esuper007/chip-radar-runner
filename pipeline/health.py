@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 from .common import log
-from .factors import FDR_Q, FactorSet, bh_qvalues, exit_price, t_test_p, wide
+from .factors import FDR_Q, FactorSet, alive, bh_qvalues, exit_price, t_test_p, wide
 
 warnings.filterwarnings("ignore", category=RuntimeWarning, module=__name__)   # empty-slice means on sparse rows
 
@@ -428,13 +428,14 @@ def weighted_score(fs: FactorSet, h: dict, base_score: pd.DataFrame) -> pd.DataF
     weights; rows without weights keep the base score."""
     W = h["weights"]
     raw_days = h.get("raw_days")
+    live = alive(fs)
     num = np.zeros((len(fs.calendar), len(fs.codes)))
     den = np.zeros_like(num)
     for n, sign in h["signs"].items():
         w = W[n].values[:, None].astype("float64")
         if not (np.isfinite(w) & (w > 0)).any():
             continue
-        rk = (fs.factors[n] * sign).rank(axis=1, pct=True)
+        rk = (fs.factors[n] * sign).where(live).rank(axis=1, pct=True)
         v = neutralize(rk, h["ind"], h["size_rk"]).values.copy()
         if raw_days is not None and raw_days.any():
             v[raw_days] = rk.values[raw_days]
