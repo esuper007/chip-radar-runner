@@ -209,6 +209,9 @@ def evaluate(st, fs, sig_names: dict | None = None, expect: dict | None = None) 
                 res["h"][str(h)] = x
             else:
                 res["h"][str(h)] = {"n": 0}
+                e = ex.get(str(h))
+                if e and len(e.get("v", [])) >= 10:      # what history says to expect, shown while results accumulate
+                    res["h"][str(h)]["expect_mean"] = round(float(np.mean(e["v"])) * 100, 2)
         res["warn"] = warn          # first horizon where the live record is below what history expects
         out["lists"][name] = res
     log.info("track: %d lists since %s", len(out["lists"]), out["since"])

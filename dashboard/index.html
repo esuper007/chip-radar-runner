@@ -900,7 +900,7 @@ function renderTrack(){
   if (!keys.length){ $("trkTable").innerHTML = ""; return; }
   const sg = v => (v > 0 ? "+" : "") + fmt(v,2) + "%";
   const cell = x => {
-    if (!x || !x.n) return `<td class="num muted" colspan="4">累積中</td>`;
+    if (!x || !x.n) return `<td class="num muted" colspan="4">累積中${x?.expect_mean != null ? `<br><span title="同樣規則在歷史樣本外的平均超額報酬">回測平均超額 ${sg(x.expect_mean)}</span>` : ""}</td>`;
     const e = x.expect, st = x.status ? TRK_ST[x.status] : null;
     const ci = x.ci ? `<br><span class="muted" title="95% 信賴區間（已考慮持有期間重疊）">${sg(x.ci[0])} ~ ${sg(x.ci[1])}</span>` : x.days ? `<br><span class="muted" title="獨立期數 = 名單天數 ÷ 持有天數">獨立期數 ${fmt(x.n_eff,0)}</span>` : "";
     return `<td class="num">${sg(x.ret)}</td><td class="num ${tone(x.excess)}"><b>${sg(x.excess)}</b>${ci}</td><td class="num">${pct(x.hit)} <span class="muted">(${fmt(x.n,0)})</span></td>
