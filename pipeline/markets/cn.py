@@ -286,7 +286,50 @@ def fetch_delisted() -> pd.DataFrame:
     return df[df["code"].str.match(CODE_RE)].drop_duplicates("code", keep="last")
 
 
-def _hist(code: str, adjust: str) -> pd.DataFrame:
+class _Baostock:
+    """Baostock (free, keeps delisted A-shares). East Money and Sina refuse requests from GitHub's servers."""
+    def __init__(self):
+        self.bs = None
+        try:
+            import baostock as bs
+            if bs.login().error_code == "0":
+                self.bs = bs
+        except Exception as e:
+            log.warning("baostock unavailable: %s", type(e).__name__)
+
+    def hist(self, code: str, adjust: str) -> pd.DataFrame:
+        if self.bs is None:
+            return pd.DataFrame()
+        sym = ("sh." if code.startswith("6") else "sz.") + code
+        try:
+            rs = self.bs.query_history_k_data_plus(sym, "date,close,volume", start_date="2013-01-01",
+                                                   end_date=dt.date.today().isoformat(), frequency="d",
+                                                   adjustflag="1" if adjust == "hfq" else "3")
+            rows = []
+            while rs.error_code == "0" and rs.next():
+                rows.append(rs.get_row_data())
+        except Exception as e:
+            log.warning("baostock history failed: %s", type(e).__name__)
+            return pd.DataFrame()
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(rows, columns=["date", "close", "volume"])
+        return pd.DataFrame({"date": pd.to_datetime(df["date"]), "close": pd.to_numeric(df["close"], errors="coerce"),
+                             "volume": pd.to_numeric(df["volume"], errors="coerce")})        # shares
+
+    def close(self):
+        if self.bs is not None:
+            try:
+                self.bs.logout()
+            except Exception:
+                pass
+
+
+def _hist(code: str, adjust: str, bsq: "_Baostock | None" = None) -> pd.DataFrame:
+    if bsq is not None:
+        df = bsq.hist(code, adjust)
+        if not df.empty and df["close"].notna().sum() > 20:
+            return df
     ak = _ak()
     try:
         df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date="20130101", end_date="20991231", adjust=adjust)
@@ -304,6 +347,9 @@ def _hist(code: str, adjust: str) -> pd.DataFrame:
                          "volume": pd.to_numeric(df["成交量"], errors="coerce") * 100})     # 手 -> shares
 
 
+MAX_ATTEMPTS = 3
+
+
 def delisted_prices(store: Store) -> None:
     """Yahoo only serves stocks that still trade, so delisted A-shares had no price at all and dropped out
     of every backtest. Fill them in a few at a time from the exchanges' official delisting lists."""
@@ -314,25 +360,33 @@ def delisted_prices(store: Store) -> None:
     dl = dl[dl["date"] >= pd.Timestamp("2014-01-01")]
     store.append("delisted", dl, keys=("date", "code"))
     have = set(store.load("price")["code"].unique())
-    tried = set(store.load_meta(DELISTED_META) or [])
-    todo = [c for c in dl["code"] if c not in have and c not in tried][:DELISTED_PER_RUN]
+    meta = store.load_meta(DELISTED_META) or {}
+    tries = {c: 1 for c in meta} if isinstance(meta, list) else dict(meta)     # old format: plain list
+    todo = [c for c in dl["code"] if c not in have and tries.get(c, 0) < MAX_ATTEMPTS][:DELISTED_PER_RUN]
     log.info("cn delisted: %d listed since 2014, %d without prices, fetching %d now", len(dl),
              sum(1 for c in dl["code"] if c not in have), len(todo))
+    if not todo:
+        return
+    bsq = _Baostock()
     rows = []
-    for c in todo:
-        raw, adj = _hist(c, ""), _hist(c, "hfq")
-        tried.add(c)
-        if raw.empty or adj.empty:
-            continue
-        m = raw.merge(adj[["date", "close"]].rename(columns={"close": "adj_close"}), on="date", how="inner")
-        m["code"] = c
-        rows.append(m[["date", "code", "adj_close", "close", "volume"]].dropna(subset=["close", "adj_close"]))
-        time.sleep(1.0)
+    try:
+        for c in todo:
+            raw, adj = _hist(c, "", bsq), _hist(c, "hfq", bsq)
+            tries[c] = tries.get(c, 0) + 1
+            if raw.empty or adj.empty:
+                continue
+            m = raw.merge(adj[["date", "close"]].rename(columns={"close": "adj_close"}), on="date", how="inner")
+            m["code"] = c
+            m = m[(m["volume"].fillna(0) > 0)]           # suspended days carry the old close with no trades
+            rows.append(m[["date", "code", "adj_close", "close", "volume"]].dropna(subset=["close", "adj_close"]))
+            time.sleep(0.3)
+    finally:
+        bsq.close()
     if rows:
         df = pd.concat(rows, ignore_index=True)
         store.append("price", df)
         log.info("cn delisted: added prices for %d stocks (%d rows)", df["code"].nunique(), len(df))
-    store.save_meta(DELISTED_META, sorted(tried))
+    store.save_meta(DELISTED_META, tries)
 
 
 def symbols(store: Store) -> dict[str, str]:
