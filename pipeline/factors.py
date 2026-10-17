@@ -42,6 +42,56 @@ def wide(df: pd.DataFrame, col: str, cal: pd.DatetimeIndex, codes: pd.Index,
     return w.astype("float32")
 
 
+def exit_price(px: pd.DataFrame) -> pd.DataFrame:
+    """Price used for the END of a forward-return window.
+
+    A stock that stops trading (delisted, merged, long suspension) used to have no price at the end of
+    the window, so that outcome silently dropped out of every backtest - and the stocks that drop out are
+    mostly the losers (survivorship bias). Here the position is valued at its LAST traded price instead:
+    the return up to the last trade counts, then it is held at that price. Entry prices still require
+    a real trade on the day (use `px` for the start of the window).
+    """
+    return px.ffill()
+
+
+# ---------------------------------------------------------------- multiple testing
+def sign_test_p(wins: int, n: int) -> float | None:
+    """One-sided P(X >= wins) for X ~ Binomial(n, 0.5): chance of winning this many years by luck."""
+    if not n:
+        return None
+    from math import comb
+    return float(sum(comb(n, k) for k in range(wins, n + 1)) / 2 ** n)
+
+
+def t_test_p(values) -> float | None:
+    """One-sided p-value that the mean of (roughly independent) values is > 0."""
+    v = np.asarray([x for x in values if x is not None and np.isfinite(x)], dtype="float64")
+    if len(v) < 6 or v.std(ddof=1) == 0:
+        return None
+    from scipy.stats import t as tdist
+    tt = v.mean() / (v.std(ddof=1) / np.sqrt(len(v)))
+    return float(tdist.sf(tt, len(v) - 1))
+
+
+def bh_qvalues(pvals: dict) -> dict:
+    """Benjamini-Hochberg q-values: the false discovery rate you accept by calling each test a discovery.
+    None p-values stay None and do not count as tests."""
+    items = [(k, p) for k, p in pvals.items() if p is not None]
+    m = len(items)
+    if not m:
+        return {k: None for k in pvals}
+    items.sort(key=lambda x: x[1])
+    q, prev = {}, 1.0
+    for i in range(m - 1, -1, -1):
+        k, p = items[i]
+        prev = min(prev, p * m / (i + 1))
+        q[k] = round(prev, 4)
+    return {k: q.get(k) for k in pvals}
+
+
+FDR_Q = 0.10        # a rule / factor / signal counts as a discovery when its q-value is <= 10%
+
+
 def since_start(w: pd.DataFrame, df: pd.DataFrame) -> pd.DataFrame:
     """Blank out dates before a dataset's first observation.
 

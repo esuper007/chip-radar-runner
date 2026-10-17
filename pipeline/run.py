@@ -14,6 +14,7 @@ import json
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .common import drain_checks, log, parse_date, today_in, weekdays
@@ -74,6 +75,11 @@ def cmd_prices(a):
     m, st = mod(a.market), Store(a.market)
     st.pull()
     prices.update(st, m.symbols(st), years_back=a.years, last_day=last_complete_day(a.market, m.TZ))
+    if hasattr(m, "delisted_prices"):            # survivorship bias: add stocks that no longer trade
+        try:
+            m.delisted_prices(st)
+        except Exception:
+            log.exception("delisted prices failed")
     st.push()
 
 
@@ -94,7 +100,7 @@ def cmd_build(a):
     hres = None
     try:
         # factor health + composite from industry/size-neutral ranks with quarterly IC weights (no look-ahead)
-        hres = health.compute(fs, st)
+        hres = health.compute(fs, st, scores["score"])
         scores["score"] = health.weighted_score(fs, hres, scores["score"])
     except Exception:
         log.exception("factor health failed; keeping the equal-weight score")
@@ -102,9 +108,23 @@ def cmd_build(a):
     out_dir = Path("dist") / a.market
     metrics_path = out_dir / "metrics.json"
     metrics = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
+    from . import track
+    expect = st.load_meta("track_expect") or {}
     if a.backtest:
+        old_blend = metrics.get("blend")
         X, Y = predict.training_frame(fs, scores)
         metrics = predict.backtest(X, Y, fs.calendar)
+        del X, Y
+        # blend weights are re-chosen once per quarter (kept fixed in between)
+        if old_blend and old_blend.get("quarter") == str(pd.Timestamp.today().to_period("Q")) and old_blend.get("weights"):
+            metrics["blend"] = old_blend
+        picks = metrics.pop("_picks", None) or {}
+        for name, pk in picks.items():
+            expect[name] = {"step": "week", **track.expect_series(fs, pk)}
+        try:
+            st.save_meta("track_expect", {k: v for k, v in expect.items() if not k.startswith(("bo", "sig:"))})
+        except Exception as e:
+            log.warning("could not save track expectations: %s", e)
         metrics["computed_at"] = str(dt.date.today())
         out_dir.mkdir(parents=True, exist_ok=True)
         metrics_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=1))
@@ -116,7 +136,7 @@ def cmd_build(a):
         st.save_models(bundle)
     else:
         log.info("using models trained %s", bundle["info"]["trained_at"])
-    fc, info = predict.forecast(fs, scores, bundle)
+    fc, info = predict.forecast(fs, scores, bundle, calib=metrics.get("calib"))
     if info.get("is_oos"):
         for hk, m_ in info["is_oos"].items():
             metrics.setdefault(hk, {})["is"] = m_
@@ -130,6 +150,7 @@ def cmd_build(a):
     qrep = quality.report(st, fs, daily_sets, getattr(m, "SOURCES", {}))
     log.info("data quality: %d of %d checks need attention", qrep["n_fail"], qrep["n"])
     from . import signals
+    ev = None
     try:
         ev = signals.compute(fs, scores)
         sig = {"stats": signals.evaluate(fs, ev), "recent": signals.recent(ev)}
@@ -143,11 +164,22 @@ def cmd_build(a):
     except Exception:
         log.exception("breakout analysis failed")
         bo = None
-    from . import track
     trk = None
     try:
-        track.record(st, fs, fc, sig, bo)
-        trk = track.evaluate(st, fs, {k: v.get("name") for k, v in ((sig or {}).get("stats") or {}).items()})
+        for name, pk in ((bo or {}).pop("_expect_picks", None) or {}).items():
+            expect[name] = {"step": "event", **track.expect_series(fs, pk)}
+        for k, e in (ev or {}).items():
+            st_k = ((sig or {}).get("stats") or {}).get(k) or {}
+            if st_k.get("oos_from"):
+                ee = e.loc[e.index >= pd.Timestamp(st_k["oos_from"])]
+                r, c = np.where(ee.values)
+                if len(r):
+                    expect[f"sig:{k}"] = {"step": "event", **track.expect_series(
+                        fs, pd.DataFrame({"date": ee.index[r], "code": ee.columns[c]}), horizons=(20, 63))}
+        bw = (metrics.get("blend") or {}).get("weights")
+        track.record(st, fs, fc, sig, bo, bw)
+        trk = track.evaluate(st, fs, {k: v.get("name") for k, v in ((sig or {}).get("stats") or {}).items()}, expect)
+        trk["weights"] = bw or track.W_PCT
         st.push()                      # keep the day's picks even if publishing fails later
     except Exception:
         log.exception("track record failed")
@@ -155,7 +187,8 @@ def cmd_build(a):
     if hres:
         wts = hres["weights"].dropna(how="all")
         hsum = {"factors": hres["factors"], "neutralized_by": hres["neutralized_by"],
-                "weights_from": str(wts.index.min().date()) if len(wts) else None}
+                "weights_from": str(wts.index.min().date()) if len(wts) else None,
+                **{k: hres.get(k) for k in ("clusters", "corr", "composite", "sbl_split", "regime_share", "fdr_q", "min_weeks", "method")}}
     res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg, bo, trk, hsum)
     log.info("build done: %s", res)
 

@@ -263,6 +263,78 @@ def backfill_day(store: Store, d: dt.date) -> dict:
     return res
 
 
+# ---------------------------------------------------------------- delisted stocks (survivorship bias)
+DELISTED_META = "delisted_tried"
+DELISTED_PER_RUN = 400
+
+
+def fetch_delisted() -> pd.DataFrame:
+    """Official lists of terminated listings from SSE and SZSE: code, name, delisting date."""
+    ak, out = _ak(), []
+    for fn, kw, c_code, c_name, c_date in (("stock_info_sh_delist", {"symbol": "全部"}, "公司代码", "公司简称", "暂停上市日期"),
+                                           ("stock_info_sz_delist", {"symbol": "终止上市公司"}, "证券代码", "证券简称", "终止上市日期")):
+        try:
+            df = getattr(ak, fn)(**kw)
+            log_fields_once(f"cn-{fn}", df.columns)
+            out.append(pd.DataFrame({"code": _norm_code(df[c_code]), "name": df[c_name].astype(str),
+                                     "date": pd.to_datetime(df[c_date], errors="coerce")}))
+        except Exception as e:
+            log.warning("cn %s failed: %s", fn, e)
+    if not out:
+        return pd.DataFrame(columns=["code", "name", "date"])
+    df = pd.concat(out, ignore_index=True).dropna(subset=["code", "date"])
+    return df[df["code"].str.match(CODE_RE)].drop_duplicates("code", keep="last")
+
+
+def _hist(code: str, adjust: str) -> pd.DataFrame:
+    ak = _ak()
+    try:
+        df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date="20130101", end_date="20991231", adjust=adjust)
+    except Exception as e:
+        log.warning("cn delisted history (east money) failed: %s", type(e).__name__)
+        df = pd.DataFrame()
+    if df is None or df.empty:
+        try:     # Sina keeps delisted symbols too
+            sd = ak.stock_zh_a_daily(symbol=("sh" if code.startswith("6") else "sz") + code, adjust=adjust)
+            return pd.DataFrame({"date": pd.to_datetime(sd["date"]), "close": pd.to_numeric(sd["close"], errors="coerce"),
+                                 "volume": pd.to_numeric(sd["volume"], errors="coerce")})
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame({"date": pd.to_datetime(df["日期"]), "close": pd.to_numeric(df["收盘"], errors="coerce"),
+                         "volume": pd.to_numeric(df["成交量"], errors="coerce") * 100})     # 手 -> shares
+
+
+def delisted_prices(store: Store) -> None:
+    """Yahoo only serves stocks that still trade, so delisted A-shares had no price at all and dropped out
+    of every backtest. Fill them in a few at a time from the exchanges' official delisting lists."""
+    import time
+    dl = fetch_delisted()
+    if dl.empty:
+        return
+    dl = dl[dl["date"] >= pd.Timestamp("2014-01-01")]
+    store.append("delisted", dl, keys=("date", "code"))
+    have = set(store.load("price")["code"].unique())
+    tried = set(store.load_meta(DELISTED_META) or [])
+    todo = [c for c in dl["code"] if c not in have and c not in tried][:DELISTED_PER_RUN]
+    log.info("cn delisted: %d listed since 2014, %d without prices, fetching %d now", len(dl),
+             sum(1 for c in dl["code"] if c not in have), len(todo))
+    rows = []
+    for c in todo:
+        raw, adj = _hist(c, ""), _hist(c, "hfq")
+        tried.add(c)
+        if raw.empty or adj.empty:
+            continue
+        m = raw.merge(adj[["date", "close"]].rename(columns={"close": "adj_close"}), on="date", how="inner")
+        m["code"] = c
+        rows.append(m[["date", "code", "adj_close", "close", "volume"]].dropna(subset=["close", "adj_close"]))
+        time.sleep(1.0)
+    if rows:
+        df = pd.concat(rows, ignore_index=True)
+        store.append("price", df)
+        log.info("cn delisted: added prices for %d stocks (%d rows)", df["code"].nunique(), len(df))
+    store.save_meta(DELISTED_META, sorted(tried))
+
+
 def symbols(store: Store) -> dict[str, str]:
     u = store.load("universe")
     if u.empty:
@@ -311,6 +383,13 @@ def build_factors(store: Store, since: str = "2014-01-01"):
     liquid = (rsum(amount, 20) / 20 >= 30_000_000) & px.notna()
     u = uni.sort_values("date").drop_duplicates("code", keep="last").set_index("code") if not uni.empty else pd.DataFrame()
     meta = u.reindex(codes)[["name", "industry", "mkt"]] if not u.empty else pd.DataFrame(index=codes)
+    dl = store.load("delisted")
+    if not dl.empty and "name" in meta:                 # delisted stocks are not in today's list: name them
+        nm = dl.drop_duplicates("code", keep="last").set_index("code")["name"]
+        miss = meta["name"].isna() & meta.index.isin(nm.index)
+        meta.loc[miss, "name"] = nm.reindex(meta.index[miss]).values + "(已下市)"
+        meta.loc[miss, "mkt"] = [("SSE" if c.startswith("6") else "SZSE") for c in meta.index[miss]]
+        meta["industry"] = meta["industry"].fillna("")
     ms = {}
     if not mg.empty:
         ms["两融融资余额(亿元)"] = mg.groupby("date")["margin_bal"].sum() / 1e8

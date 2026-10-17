@@ -67,6 +67,12 @@ svg text{fill:var(--muted);font-family:var(--f-num);font-size:10px}
 .mq th:first-child,.mq td:first-child{text-align:left}
 .mq thead th{color:var(--muted);font-weight:500}
 .mq tr.best td{background:var(--accent-soft)}
+.relrow{display:flex;flex-wrap:wrap;gap:14px} .rel{margin:0} .rel figcaption{font-size:12px;color:var(--muted);text-align:center}
+.rel text{font-size:9px;fill:var(--muted)} .rel .diag{stroke:var(--line);stroke-dasharray:3 3} .rel .ax{stroke:var(--line)}
+.rel polyline.r0{stroke:var(--muted);stroke-width:1.5} .rel circle.r0{fill:var(--muted)} .rel polyline.r1{stroke:var(--accent);stroke-width:2} .rel circle.r1{fill:var(--accent)}
+.key{display:inline-block;width:14px;height:3px;margin:0 4px 2px 8px;vertical-align:middle} .key.r0{background:var(--muted)} .key.r1{background:var(--accent)}
+.mq tr.warnrow td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+.mq.hm td,.mq.hm th{padding:3px 4px;font-size:11px;text-align:center} .mq.hm td:first-child{text-align:left}
 .scroll{overflow-x:auto}
 
 /* screener */
@@ -227,11 +233,11 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
       <label>機器學習 <input type="number" id="wMl" min="0" max="100" step="5" inputmode="numeric">%</label>
       <label>歷史相似 <input type="number" id="wAn" min="0" max="100" step="5" inputmode="numeric">%</label>
       <span class="note" id="wSum"></span>
-      <button class="btn" type="button" id="wReset">恢復 70／15／15</button>
+      <button class="btn" type="button" id="wReset">恢復建議權重</button>
     </div>
     <p id="rkDual"></p>
     <div class="rank4" id="rank"></div>
-    <p class="hint">上漲機率是模型估計的「期間結束時股價高於現在」的機率，下跌機率＝1－上漲機率；漲跌幅是含息報酬的中位數預估。「加權綜合」預設以樣本內外模型為主（70%），機器學習與歷史相似各占 15%，可在上方自行調整；合計不是 100% 時按比例換算，某方法沒有數值時，權重按其餘方法重新分配。<b>醒目標示</b>：同時進入「上漲機率」與「預估漲幅」前 20 名的以紅底標示（雙榜看漲），同時進入「下跌機率」與「預估跌幅」前 20 名的以綠底標示（雙榜看跌），顏色隨漲跌慣例切換；完整名單列在排行上方。排行只代表模型的相對看法，可信度請對照下方的回測成績。點一列看詳細籌碼，按 ☆ 加入觀察清單。</p>
+    <p class="hint">上漲機率是模型估計的「期間結束時股價高於現在」的機率，下跌機率＝1－上漲機率；漲跌幅是含息報酬的中位數預估。「加權綜合」的預設權重由每週回測依三個模型在樣本外的排序能力（排名 IC）建議、每季更新一次（取最佳組合與 70／15／15 的中間值，避免過度貼合）；回測尚未產生時用 70／15／15。可在上方自行調整，自訂後會記住，按「恢復建議」回到系統建議；合計不是 100% 時按比例換算，某方法沒有數值時，權重按其餘方法重新分配。<b>醒目標示</b>：同時進入「上漲機率」與「預估漲幅」前 20 名的以紅底標示（雙榜看漲），同時進入「下跌機率」與「預估跌幅」前 20 名的以綠底標示（雙榜看跌），顏色隨漲跌慣例切換；完整名單列在排行上方。排行只代表模型的相對看法，可信度請對照下方的回測成績。點一列看詳細籌碼，按 ☆ 加入觀察清單。</p>
   </section>
 
   <section class="panel" aria-label="起漲訊號">
@@ -247,7 +253,7 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <div class="pager"><span id="bsInfo" class="muted"></span><button class="btn" id="bsMore">顯示更多</button></div>
     <h2 style="margin-top:14px">各訊號的歷史驗證（樣本外）</h2>
     <div class="scroll" id="bsStats"></div>
-    <p class="hint">每種訊號只在條件「第一天成立」時算一次。驗證方式：把歷史依時間分成前 70%（用來設定條件）與後 30%（樣本外，只用來檢驗，中間空出 63 個交易日避免重疊），統計樣本外每次觸發後 20、63 個交易日的表現。超額報酬是和同一天全市場（流動性足夠的股票）平均報酬相比，每天先去除前後 1% 的極端值；打敗大盤比例是報酬高於同一天中位數的比例（基準約 50%）。標示「有效」的條件：樣本外至少 50 次、20 日平均超額 ≥ 0.3%、打敗大盤比例 ≥ 51%、20 日上漲比例不低於基準，且 63 日平均超額為正。標示「資料累積中」的訊號，所需資料（例如集保大戶、主力資金）是從開始執行起才累積，還無法驗證。這些都是機率上的優勢，不保證個股會上漲。</p>
+    <p class="hint">每種訊號只在條件「第一天成立」時算一次。驗證方式：把歷史依時間分成前 70%（用來設定條件）與後 30%（樣本外，只用來檢驗，中間空出 63 個交易日避免重疊），統計樣本外每次觸發後 20、63 個交易日的表現。超額報酬是和同一天全市場（流動性足夠的股票）平均報酬相比，每天先去除前後 1% 的極端值；打敗大盤比例是報酬高於同一天中位數的比例（基準約 50%）。標示「有效」的條件：樣本外至少 50 次、20 日平均超額 ≥ 0.3%、打敗大盤比例 ≥ 51%、20 日上漲比例不低於基準，且 63 日平均超額為正；另外還要通過多重檢定：把樣本外每次觸發的 20 日超額報酬按月平均（同一個月的觸發常受同一波行情影響，不算獨立），檢定月平均是否顯著大於 0，再對所有訊號一起做 Benjamini–Hochberg 校正，q ≤ 10% 才算有效；只過原始門檻的標示「校正後未通過」。標示「資料累積中」的訊號，所需資料（例如集保大戶、主力資金）是從開始執行起才累積，還無法驗證。這些都是機率上的優勢，不保證個股會上漲。</p>
   </section>
 
   <section class="panel" aria-label="突破型起漲">
@@ -280,14 +286,19 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <div class="sec-head"><h2>實戰成績單：每天的名單，後來真的表現如何</h2></div>
     <p class="hint" id="trkStatus" style="margin:0 0 10px"></p>
     <div class="scroll" id="trkTable"></div>
-    <p class="hint">系統每天收盤後把當天的排行榜、起漲訊號、突破名單存檔，之後依實際股價計算 20、63、126 個交易日後的報酬。「超額」是和同期全市場（流動性足夠的股票）等權平均相比；「勝率」是超額報酬為正的比例。這是上線後的真實紀錄，不是回測，也不計交易成本。名單要經過對應天數才會有結果。</p>
+    <p class="hint">系統每天收盤後把當天的排行榜、起漲訊號、突破名單存檔，之後依實際股價計算 20、63、126 個交易日後的報酬。「超額」是和同期全市場（流動性足夠的股票）等權平均相比；「勝率」是超額報酬為正的比例。這是上線後的真實紀錄，不是回測，也不計交易成本。名單要經過對應天數才會有結果。<b>95% 區間</b>：同一個持有期間內每天的名單會重疊，所以獨立樣本數以「名單天數 ÷ 持有天數」計算，滿 2 期才顯示區間。<b>回測預期</b>：把同樣的名單規則套在歷史樣本外資料上，算出「和目前紀錄一樣長的期間」平均超額報酬的 10%～90% 範圍；實戰低於下限且已累積 10 天以上，就標示「低於預期」，代表訊號可能正在失效。</p>
   </section>
 
   <section class="panel" aria-label="籌碼因子體檢">
     <div class="sec-head"><h2>籌碼因子體檢：每個指標實際上有沒有預測力</h2></div>
     <p class="hint" id="hlStatus" style="margin:0 0 10px"></p>
     <div class="scroll" id="hlTable"></div>
-    <p class="hint">每個籌碼因子先扣除產業與市值（成交金額）的影響，再看它和之後 5、20、60 個交易日超額報酬的排序相關（IC，正值代表有預測力，0.02–0.05 已屬有用）。IR 是 20 日 IC 的穩定度；正向年數是 IC 為正的年份；五等分報酬差是因子最好 20% 減最差 20% 的 20 日超額報酬；換手是 20 日後排名的變動程度。綜合籌碼分數的權重由系統每季依過去 3 年的 IR 自動決定（只用當時已知的結果），表現轉差的因子權重歸零。不計交易成本。</p>
+    <div class="dq" style="margin-top:12px">
+      <div><h2>綜合分數四種算法比較</h2><div class="scroll" id="hlComp"></div></div>
+      <div><h2>因子相關性（重疊的因子共用權重）</h2><div class="scroll" id="hlCorr"></div></div>
+      <div id="hlSblWrap" hidden><h2>借券／融券因子拆解：方向相反從哪裡來</h2><div class="scroll" id="hlSbl"></div></div>
+    </div>
+    <p class="hint">每個籌碼因子先扣除產業與市值（成交金額）的影響，再看它和之後 5、20、60 個交易日超額報酬的排序相關（IC，正值代表有預測力，0.02–0.05 已屬有用）。IR 是 20 日 IC 的穩定度；正向年數是 IC 為正的年份；五等分報酬差是因子最好 20% 減最差 20% 的 20 日超額報酬；換手是 20 日後排名的變動程度。「校正後」是多重檢定：同時檢驗幾十個因子，總會有幾個碰巧看起來有效，所以用 Benjamini–Hochberg 方法把偽發現率控制在 10% 以內，仍顯著才標示「顯著」。綜合籌碼分數的權重由系統每季依過去 3 年決定（只用當時已知的結果）：「分群做法」先把彼此相關性 ≥ 0.5 的因子歸成一群，每群依整群的 IR 給一份權重，群內再依各自的 IR 分配，避免同一件事被重複計算；「不分群做法」每個因子各自依 IR 給權重。每季依過去 3 年的實際預測力自動選用較好的做法（見下方比較）；表現轉差的因子權重歸零，歷史未滿 2 年的因子先不給權重。不計交易成本。</p>
   </section>
 
   <section class="pulse" id="pulse" aria-label="市場籌碼概況"></section>
@@ -466,10 +477,47 @@ function renderQuality(s){
     const [n0, x0] = isAny[0], L = s.labels || {};
     html += `<p class="hint" style="margin-top:8px">樣本內外模型：樣本內 ${esc(x0.split?.in_sample)}，樣本外 ${esc(x0.split?.out_of_sample)}（中間空出一段預測期間，避免資料重疊）。${n0}模型影響最大的因子（係數＝因子從全市場最低排到最高時，預期報酬增減的百分點）：${(x0.coef||[]).slice(0,8).map(c=>`${esc(L[c.feature]||c.feature)} <span class="num ${tone(c.coef)}">${c.coef>0?"+":""}${fmt(c.coef,2)}</span>`).join("、")}</p>`;
   }
+  html += calibHtml(m);
   if (m.group_ic){
     html += `<p class="hint" style="margin-top:8px">各面向對未來一季報酬的排名 IC：${Object.entries(m.group_ic).map(([k,v])=>`${GROUPS[k.slice(2)]||k} <span class="num ${tone(v)}">${fmt(v,3)}</span>`).join("、")}（${esc(m.computed_at||"")}）</p>`;
   }
   el.innerHTML = html;
+}
+
+// reliability diagram: predicted probability (x) vs how often stocks really went up (y)
+function relSvg(raw, cal, title){
+  const W = 180, H = 150, P = 26, X = v => P + v * (W - P - 6), Y = v => H - P - v * (H - P - 8);
+  const line = (b, cls) => b && b.length ? `<polyline fill="none" class="${cls}" points="${b.map(x => `${X(x.p).toFixed(1)},${Y(x.up).toFixed(1)}`).join(" ")}"/>` +
+    b.map(x => `<circle class="${cls}" cx="${X(x.p).toFixed(1)}" cy="${Y(x.up).toFixed(1)}" r="2.6"><title>預測 ${pct(x.p)}，實際上漲 ${pct(x.up)}（${fmt(x.n,0)} 筆）</title></circle>`).join("") : "";
+  return `<figure class="rel"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(title)}的機率校準圖">
+    <line x1="${X(0)}" y1="${Y(0)}" x2="${X(1)}" y2="${Y(1)}" class="diag"/>
+    <line x1="${X(0)}" y1="${Y(0)}" x2="${X(1)}" y2="${Y(0)}" class="ax"/><line x1="${X(0)}" y1="${Y(0)}" x2="${X(0)}" y2="${Y(1)}" class="ax"/>
+    <text x="${X(0)}" y="${H - 10}">0</text><text x="${X(1)}" y="${H - 10}" text-anchor="end">100%</text><text x="${X(.5)}" y="${H - 1}" text-anchor="middle">預測上漲機率</text>
+    <text x="4" y="${Y(1) + 4}">100%</text>
+    ${line(raw, "r0")}${line(cal, "r1")}</svg><figcaption>${esc(title)}</figcaption></figure>`;
+}
+function calibHtml(m){
+  const C = m.calib || {}, MN = {is: "樣本內外", ml: "機器學習", an: "歷史相似"};
+  let out = "";
+  const rows = [];
+  for (const [h, n] of HZ) for (const mk of ["is", "ml", "an"]){ const c = C[mk]?.[h]; if (c) rows.push([n, mk, c]); }
+  if (rows.length){
+    out += `<h2 style="margin-top:14px">機率校準：「上漲機率 70%」歷史上真的有七成上漲嗎？</h2><div class="relrow">${["is","ml","an"].filter(mk => C[mk]?.["1q"]).map(mk => relSvg(C[mk]["1q"].bins_raw, C[mk]["1q"].bins_cal, `1季・${MN[mk]}`)).join("")}</div>
+    <p class="hint" style="margin:4px 0 8px"><span class="key r0"></span>校準前（模型原始機率）<span class="key r1"></span>逐年往前校準後。點越靠近對角線，代表機率越可信；在對角線下方代表模型太樂觀。</p>
+    <table class="mq"><thead><tr><th>期間／方法</th><th>Brier 校準前</th><th>Brier 校準後</th><th>評估筆數</th><th>目前的機率</th></tr></thead><tbody>
+    ${rows.map(([n, mk, c]) => `<tr><td>${n}・${MN[mk]}</td><td class="num">${c.brier_raw == null ? "—" : fmt(c.brier_raw,4)}</td><td class="num">${c.brier_cal == null ? "—" : `<b class="${c.apply ? "up" : ""}">${fmt(c.brier_cal,4)}</b>`}</td><td class="num">${fmt(c.n_eval || 0,0)}</td><td>${c.apply ? '<span class="pill ok2">已校準</span>' : '<span class="pill third">維持原始</span>'}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="hint" style="margin-top:6px">Brier 分數是機率預測的平方誤差，越小越好。校準方法為保序迴歸（isotonic），逐年往前做：每一年只用之前已知結果的樣本外預測來校準，校準後 Brier 改善 0.5% 以上才套用到畫面上的上漲機率；排序幾乎不變，只修正機率的高低。</p>`;
+  }
+  const B = m.blend;
+  if (B?.ic){
+    const r = (lab, k, w) => `<tr${k === "final" ? ' class="best"' : ""}><td>${lab}</td><td class="num">${w ? `${w.is}／${w.ml}／${w.an}` : ""}</td><td class="num">${fmt(B.ic[k],4)}</td></tr>`;
+    out += `<h2 style="margin-top:14px">加權綜合的權重怎麼來</h2><table class="mq"><thead><tr><th>組合</th><th>樣本內外／機器學習／歷史相似 %</th><th>平均排名 IC</th></tr></thead><tbody>
+      ${r("建議權重（目前預設）", "final", B.weights)}${r("回測最佳格點", "best_grid", B.best_grid)}${r("原本預設", "default", {is:70,ml:15,an:15})}${r("平均分配", "equal", {is:34,ml:33,an:33})}
+      ${r("只用樣本內外", "is_only", {is:100,ml:0,an:0})}${r("只用機器學習", "ml_only", {is:0,ml:100,an:0})}${r("只用歷史相似", "an_only", {is:0,ml:0,an:100})}</tbody></table>
+      <p class="hint" style="margin-top:6px">在三個模型都有樣本外預測的日期（${Object.entries(B.period || {}).map(([h, p]) => `${(HZ.find(x => x[0] === h) || [h, h])[1]} ${esc(p)}`).join("；")}），以每 5% 一格試遍所有組合，計算三個期間平均的每日排名 IC；最佳格點和 70／15／15 各取一半作為建議權重，避免過度貼合。每季（${esc(B.quarter || "")}）重新決定一次。</p>`;
+  }
+  return out;
 }
 
 function renderDQ(s){
@@ -479,7 +527,16 @@ function renderDQ(s){
   const li = checks.map(c => `<li><span class="pill ${c.ok?"ok":"ng"}">${c.ok?"通過":"注意"}</span><span>${esc(c.name)}<small>${esc(c.detail||"")}</small></span></li>`).join("");
   const src = (q.sources||[]).map(x => `<li><span class="pill ${x.official?"off":"third"}">${x.official?"官方":"第三方"}</span><span>${esc(DS[x.dataset]||x.dataset)}<small>${esc(x.source)}</small></span></li>`).join("");
   el.innerHTML = `<div><p class="hint" style="margin:0 0 8px">${q.n_fail ? `${q.n_fail} 項需要注意，其餘 ${q.n - q.n_fail} 項通過。` : `全部 ${q.n} 項檢查通過。`}檢查包含：官方市場合計與個股加總是否一致、不同來源互相比對、每日筆數與缺漏日期。</p><ul>${li}</ul></div>
-    <div><p class="hint" style="margin:0 0 8px">有官方來源時一律優先採用；標示「第三方」的資料為業者整理，解讀時請保留彈性。</p><ul>${src}</ul></div>`;
+    <div><p class="hint" style="margin:0 0 8px">有官方來源時一律優先採用；標示「第三方」的資料為業者整理，解讀時請保留彈性。</p><ul>${src}</ul></div>${survHtml(q.survivorship)}`;
+}
+const SURV_ST = {fixed: ["ok", "已修正"], partial: ["ng", "補資料中"], not_fixable: ["ng", "無法完全修正"], unknown: ["third", "無法判斷"]};
+function survHtml(v){
+  if (!v || v.error) return "";
+  const st = SURV_ST[v.status] || SURV_ST.unknown;
+  const yrs = Object.entries(v.by_year || {}).map(([y, n]) => `${y} 年 ${n}`).join("、");
+  return `<div><h2 style="font-size:14px;margin:0 0 6px">存活者偏差檢查 <span class="pill ${st[0]}">${st[1]}</span></h2>
+    <p class="hint" style="margin:0">回測已納入 <b>${fmt(v.included,0)}</b> 檔後來下市或停止交易的股票（其中 ${fmt(v.included_liquid,0)} 檔曾經流動性足夠）${yrs ? `，依停止交易年份：${yrs}` : ""}。這些股票在停止交易後以最後成交價計算報酬，不會從回測中消失。
+    ${v.missing != null ? `比對「${esc(v.ref)}」，${v.missing ? `還有約 <b>${fmt(v.missing,0)}</b> 檔曾經存在、但找不到股價的股票沒有納入${v.status === "not_fixable" ? "（這個市場沒有免費的官方下市股價來源，回測結果可能略為偏樂觀，解讀時請保留彈性）" : "（系統每天自動補一批）"}。` : "沒有發現遺漏。"}` : ""}</p></div>`;
 }
 
 // ---------- screener ----------
@@ -634,44 +691,51 @@ async function explain(r){
 
 // ---------- daily forecast rankings ----------
 const avgOf = xs => { xs = xs.filter(x => x != null); return xs.length ? xs.reduce((p,c)=>p+c,0)/xs.length : null; };
-// Ranking blend: in/out-of-sample model 70%, machine learning 15%, historical analogs 15%
-// (weights are renormalised over the methods that have a value for this stock).
+// Ranking blend of the three models. Default = the weights the weekly backtest suggests for this market
+// (chosen once a quarter from out-of-sample rank IC, shrunk halfway to 70/15/15); before a backtest exists
+// 70/15/15. A viewer who types their own weights keeps them until "恢復建議權重".
 const W_DEF = {is: 70, ml: 15, an: 15};
-let RANK_W = {...W_DEF};
+let RANK_W = {...W_DEF}, RANK_CUSTOM = false;
 const W_IN = {is: "wIs", ml: "wMl", an: "wAn"};
 function cleanW(o){ const w = {}; for (const k of Object.keys(W_DEF)){ const v = Number(o?.[k]); w[k] = isFinite(v) && v >= 0 ? Math.min(v, 1000) : W_DEF[k]; }
   return Object.values(w).some(v => v > 0) ? w : {...W_DEF}; }
-try{ RANK_W = cleanW(JSON.parse(store.get("rankWeights") || "null") || W_DEF); }catch(e){ RANK_W = {...W_DEF}; }
+try{ const sv = store.get("rankWeights"); if (sv){ RANK_W = cleanW(JSON.parse(sv)); RANK_CUSTOM = true; } }catch(e){ RANK_W = {...W_DEF}; RANK_CUSTOM = false; }
+const sugW = () => { const w = S.summary?.[S.market]?.metrics?.blend?.weights; return w ? cleanW(w) : null; };
+const curW = () => RANK_CUSTOM ? RANK_W : (sugW() || W_DEF);
 const PREF = {ref: null};
 function showW(){
-  for (const [k,id] of Object.entries(W_IN)) $(id).value = RANK_W[k];
-  const tot = Object.values(RANK_W).reduce((a,b) => a+b, 0);
-  $("wSum").textContent = tot === 100 ? "合計 100%" : `合計 ${fmt(tot,0)}%，會依比例換算成 ${Object.keys(W_DEF).map(k => fmt(RANK_W[k]/tot*100,0)+"%").join("／")}`;
-  $("rkM").options[0].textContent = `加權綜合（樣本內外 ${fmt(RANK_W.is/tot*100,0)}%）`;
+  const W = curW();
+  for (const [k,id] of Object.entries(W_IN)) $(id).value = W[k];
+  const tot = Object.values(W).reduce((a,b) => a+b, 0), sg = sugW();
+  const src = RANK_CUSTOM ? "你自訂的權重" : sg ? "依回測建議（每季更新）" : "預設 70／15／15（回測建議尚未產生）";
+  $("wSum").textContent = (tot === 100 ? "合計 100%" : `合計 ${fmt(tot,0)}%，會依比例換算成 ${Object.keys(W_DEF).map(k => fmt(W[k]/tot*100,0)+"%").join("／")}`) + `・${src}`;
+  $("rkM").options[0].textContent = `加權綜合（樣本內外 ${fmt(W.is/tot*100,0)}%）`;
+  $("wReset").textContent = sg ? `恢復建議 ${sg.is}／${sg.ml}／${sg.an}` : "恢復 70／15／15";
   $("rkW").hidden = $("rkM").value !== "avg";
 }
 async function saveW(){
-  store.set("rankWeights", JSON.stringify(RANK_W));
-  if (PREF.ref){ try{ await PREF.ref.set({rank_weights: RANK_W, updated_at: new Date().toISOString()}); }catch(e){} }
+  store.set("rankWeights", RANK_CUSTOM ? JSON.stringify(RANK_W) : "");
+  if (PREF.ref){ try{ await PREF.ref.set({rank_weights: RANK_CUSTOM ? RANK_W : null, updated_at: new Date().toISOString()}); }catch(e){} }
 }
 function readW(){
   const raw = Object.fromEntries(Object.entries(W_IN).map(([k,id]) => [k, $(id).value === "" ? 0 : Number($(id).value)]));
-  if (!Object.values(raw).some(v => v > 0)){ $("wSum").textContent = "權重不能全部為 0，已恢復預設。"; return {...W_DEF}; }
+  if (!Object.values(raw).some(v => v > 0)) return null;
   return cleanW(raw);
 }
 Object.values(W_IN).forEach(id => $(id).addEventListener("change", () => {
-  const zero = !Object.values(W_IN).some(i => Number($(i).value) > 0);
-  RANK_W = readW(); showW(); renderSignals(); if (zero) $("wSum").textContent = "權重不能全部為 0，已恢復預設 70／15／15。"; renderRank(); saveW(); }));
-$("wReset").onclick = () => { RANK_W = {...W_DEF}; showW(); renderRank(); saveW(); };
+  const w = readW();
+  if (w){ RANK_W = w; RANK_CUSTOM = true; } else RANK_CUSTOM = false;
+  showW(); if (!w) $("wSum").textContent = "權重不能全部為 0，已恢復建議權重。"; renderSignals(); renderRank(); saveW(); }));
+$("wReset").onclick = () => { RANK_CUSTOM = false; showW(); renderSignals(); renderRank(); saveW(); };
 async function prefsConnect(db, uid){
   const ref = db.doc("data/users/" + uid + "/prefs");
   try{
     const snap = await ref.get();
-    if (snap.exists && snap.data()?.rank_weights){ RANK_W = cleanW(snap.data().rank_weights); store.set("rankWeights", JSON.stringify(RANK_W)); showW(); renderRank(); }
+    if (snap.exists && snap.data()?.rank_weights){ RANK_W = cleanW(snap.data().rank_weights); RANK_CUSTOM = true; store.set("rankWeights", JSON.stringify(RANK_W)); showW(); renderRank(); }
     PREF.ref = ref;
   }catch(e){}
 }
-const wAvg = (r,h,stat) => { let s = 0, w = 0; for (const [k,wt] of Object.entries(RANK_W)){ const v = r.fc?.[k]?.[h]?.[stat]; if (v != null){ s += v*wt; w += wt; } } return w ? s/w : null; };
+const wAvg = (r,h,stat) => { let s = 0, w = 0; for (const [k,wt] of Object.entries(curW())){ const v = r.fc?.[k]?.[h]?.[stat]; if (v != null){ s += v*wt; w += wt; } } return w ? s/w : null; };
 const pUp = (r,h,m) => m === "avg" ? wAvg(r,h,"p_up") : (r.fc?.[m]?.[h]?.p_up ?? null);
 const q50 = (r,h,m) => m === "avg" ? wAvg(r,h,"q50") : (r.fc?.[m]?.[h]?.q50 ?? null);
 showW();
@@ -683,6 +747,7 @@ for (const id of ["rkLiq","rkFund"]) if (store.get(id) === "0") $(id).checked = 
 const FUND = /\b(FUND|ETF|ETN|MUNICIPAL|MUNI)\b/i;
 
 function renderRank(){
+  showW();
   const el = $("rank"), sc = S.screen[S.market]; if (!sc) return;
   const h = $("rkH").value, m = $("rkM").value, liq = $("rkLiq").checked, hn = HZ.find(x => x[0]===h)[1];
   const exF = $("rkFund").checked;
@@ -758,11 +823,11 @@ function renderSigStats(defs){
   if (!keys.length){ el.innerHTML = `<span class="muted">尚未計算。</span>`; return; }
   const b = defs[keys[0]].base || {}, sp = defs[keys[0]].split || {};
   const pc = v => v == null ? "—" : pct(v), ex = v => v == null ? "—" : `<span class="${tone(v)}">${v>0?"+":""}${fmt(v,2)}%</span>`;
-  el.innerHTML = `<table class="mq"><thead><tr><th>訊號</th><th>狀態</th><th>樣本外次數</th><th>20日上漲比例</th><th>20日平均超額</th><th>20日打敗大盤</th><th>63日上漲比例</th><th>63日平均超額</th></tr></thead><tbody>
-    <tr><td class="muted">基準（所有股票、所有日子）</td><td></td><td class="num muted">${fmt(b["20"]?.n,0)}</td><td class="num muted">${pc(b["20"]?.hit)}</td><td class="num muted">${ex(b["20"]?.excess)}</td><td class="num muted">${pc(b["20"]?.beat)}</td><td class="num muted">${pc(b["63"]?.hit)}</td><td class="num muted">${ex(b["63"]?.excess)}</td></tr>
+  el.innerHTML = `<table class="mq"><thead><tr><th>訊號</th><th>狀態</th><th>樣本外次數</th><th>20日上漲比例</th><th>20日平均超額</th><th>20日打敗大盤</th><th>63日上漲比例</th><th>63日平均超額</th><th title="以月平均超額報酬做單尾 t 檢定，再用 Benjamini–Hochberg 校正">校正後 q</th></tr></thead><tbody>
+    <tr><td class="muted">基準（所有股票、所有日子）</td><td></td><td class="num muted">${fmt(b["20"]?.n,0)}</td><td class="num muted">${pc(b["20"]?.hit)}</td><td class="num muted">${ex(b["20"]?.excess)}</td><td class="num muted">${pc(b["20"]?.beat)}</td><td class="num muted">${pc(b["63"]?.hit)}</td><td class="num muted">${ex(b["63"]?.excess)}</td><td></td></tr>
     ${keys.map(k => { const d = defs[k], o = d.oos || {};
-      return `<tr title="${esc(d.desc)}"><td>${esc(d.name)}</td><td>${(o["20"]?.n||0) < 50 ? `<span class="pill third" title="樣本外觸發不到 50 次，這類資料從開始執行起才累積">資料累積中</span>` : `<span class="pill ${d.valid?"ok2":"ng"}">${d.valid?"有效":"未通過"}</span>`}</td><td class="num">${fmt(o["20"]?.n,0)}</td>
-        <td class="num">${pc(o["20"]?.hit)}</td><td class="num">${ex(o["20"]?.excess)}</td><td class="num">${pc(o["20"]?.beat)}</td><td class="num">${pc(o["63"]?.hit)}</td><td class="num">${ex(o["63"]?.excess)}</td></tr>`; }).join("")}
+      return `<tr title="${esc(d.desc)}"><td>${esc(d.name)}</td><td>${(o["20"]?.n||0) < 50 ? `<span class="pill third" title="樣本外觸發不到 50 次，這類資料從開始執行起才累積">資料累積中</span>` : (d.valid ? `<span class="pill ok2">有效</span>` : d.valid_raw ? `<span class="pill third" title="通過原始門檻，但多重檢定校正後不顯著">校正後未通過</span>` : `<span class="pill ng">未通過</span>`)}</td><td class="num">${fmt(o["20"]?.n,0)}</td>
+        <td class="num">${pc(o["20"]?.hit)}</td><td class="num">${ex(o["20"]?.excess)}</td><td class="num">${pc(o["20"]?.beat)}</td><td class="num">${pc(o["63"]?.hit)}</td><td class="num">${ex(o["63"]?.excess)}</td><td class="num">${d.q == null ? "—" : fmt(d.q,3)}</td></tr>`; }).join("")}
   </tbody></table><p class="hint" style="margin-top:6px">樣本內 ${esc(sp.is||"")}，樣本外 ${esc(sp.oos||"")}。滑鼠移到訊號名稱可看條件。</p>`;
 }
 $("bsRows").addEventListener("click", async e => {
@@ -772,33 +837,77 @@ $("bsRows").addEventListener("click", async e => {
 $("bsRows").addEventListener("keydown", e => { const tr = e.target.closest("tr[data-c]"); if (tr && e.target === tr && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openStock(tr.dataset.c); }});
 
 // ---------- factor health ----------
+const COMP_NAMES = {equal_raw: "等權（最早的做法）", ir_raw: "IR 加權・未扣產業市值", ir_neutral: "IR 加權・扣除產業市值", cluster_neutral: "分群加權・扣除產業市值", chosen: "每季自動選擇（實際使用）"};
 function renderHealth(){
   const sm = S.summary[S.market] || {}, hl = sm.health || {}, F = hl.factors || {};
   const ks = Object.keys(F).sort((a, b) => (F[b].weight ?? -1) - (F[a].weight ?? -1) || (F[b].ir20 ?? -9) - (F[a].ir20 ?? -9));
   const by = {industry: "產業", size: "市值"};
-  $("hlStatus").textContent = ks.length ? `共 ${ks.length} 個因子；已扣除${(hl.neutralized_by || []).map(x => by[x] || x).join("、") || "（無）"}的影響。自動權重自 ${hl.weights_from || "—"} 起生效。` : "尚未計算，下次資料更新後出現。";
-  if (!ks.length){ $("hlTable").innerHTML = ""; return; }
+  const nOk = ks.filter(k => F[k].fdr_ok).length;
+  $("hlStatus").textContent = ks.length ? `共 ${ks.length} 個因子；已扣除${(hl.neutralized_by || []).map(x => by[x] || x).join("、") || "（無）"}的影響。自動權重自 ${hl.weights_from || "—"} 起生效。多重檢定校正後仍顯著：${nOk} 個（偽發現率 ≤ ${pct(hl.fdr_q ?? 0.1)}）。` : "尚未計算，下次資料更新後出現。";
+  if (!ks.length){ ["hlTable","hlComp","hlCorr","hlSbl"].forEach(id => $(id).innerHTML = ""); return; }
   const ic = v => v == null ? "—" : `<span class="${v > 0.02 ? "up" : v < -0.01 ? "down" : ""}">${fmt(v, 3)}</span>`;
-  $("hlTable").innerHTML = `<table class="mq"><thead><tr><th>因子</th><th>面向</th><th>IC 5日</th><th>IC 20日</th><th>IC 60日</th><th>IR</th><th>正向年數</th><th>五等分報酬差</th><th>換手</th><th>目前權重</th></tr></thead><tbody>
-    ${ks.map(k => { const f = F[k]; return `<tr${(f.weight || 0) > 0 ? "" : ' class="muted"'}><td>${esc(f.label || k)}${f.sign < 0 ? ' <span class="muted">（反向）</span>' : ""}</td><td>${esc(GROUPS[f.group] || f.group)}</td>
+  const clusterOf = {}; (hl.clusters || []).forEach((c, i) => c.forEach(n => clusterOf[n] = c.length > 1 ? i + 1 : null));
+  const fdrCell = f => f.q == null ? `<span class="muted">—</span>` : `<span class="pill ${f.fdr_ok ? "ok2" : "third"}" title="單一檢定 p=${fmt(f.p,4)}；校正後 q=${fmt(f.q,4)}">${f.fdr_ok ? "顯著" : "不顯著"}</span>`;
+  const alt = hl.method && hl.method !== "cluster_neutral" ? ["分群做法", "weight_cluster"] : ["不分群做法", "weight_ir"];
+  const rg = f => f.regime ? `${ic(f.regime.bull)}／${ic(f.regime.bear)}` : "—";
+  const rv = f => f.regime ? `${ic(f.regime.hivol)}／${ic(f.regime.lovol)}` : "—";
+  $("hlTable").innerHTML = `<table class="mq"><thead><tr><th>因子</th><th>面向</th><th>IC 5日</th><th>IC 20日</th><th>IC 60日</th><th>IR</th><th>正向年數</th><th title="Benjamini–Hochberg 多重檢定校正">校正後</th><th title="20 日 IC：大盤 60 日上漲／下跌時">多頭／空頭</th><th title="20 日 IC：大盤波動高於／低於過去一年中位數時">高／低波動</th><th>五等分報酬差</th><th>換手</th><th title="相關性 ≥ 0.5 的因子屬同一群，共用一份權重">同群</th><th>目前權重</th><th class="muted" title="另一種權重算法（未被本季選用）的權重，供比較">${alt[0]}</th></tr></thead><tbody>
+    ${ks.map(k => { const f = F[k]; return `<tr${(f.weight || 0) > 0 ? "" : ' class="muted"'}><td>${esc(f.label || k)}${f.sign < 0 ? ' <span class="muted">（反向）</span>' : ""}${f.accumulating ? ` <span class="pill third" title="已知結果約 ${fmt(f.weeks||0,0)} 週，滿 ${hl.min_weeks||104} 週（約 2 年）才給權重">資料累積中</span>` : ""}</td><td>${esc(GROUPS[f.group] || f.group)}</td>
       <td class="num">${ic(f.ic5)}</td><td class="num">${ic(f.ic20)}</td><td class="num">${ic(f.ic60)}</td><td class="num">${f.ir20 == null ? "—" : fmt(f.ir20,2)}</td>
-      <td class="num">${f.years ? `${f.pos_years}/${f.years}` : "—"}</td><td class="num ${tone(f.q_spread20)}">${f.q_spread20 == null ? "—" : (f.q_spread20 > 0 ? "+" : "") + fmt(f.q_spread20,2) + "%"}</td>
-      <td class="num">${f.turnover == null ? "—" : pct(f.turnover)}</td><td class="num"><b>${f.weight == null ? "—" : fmt(f.weight,1) + "%"}</b></td></tr>`; }).join("")}
-    </tbody></table>`;
+      <td class="num">${f.years ? `${f.pos_years}/${f.years}` : "—"}</td><td>${fdrCell(f)}</td><td class="num">${rg(f)}</td><td class="num">${rv(f)}</td><td class="num ${tone(f.q_spread20)}">${f.q_spread20 == null ? "—" : (f.q_spread20 > 0 ? "+" : "") + fmt(f.q_spread20,2) + "%"}</td>
+      <td class="num">${f.turnover == null ? "—" : pct(f.turnover)}</td><td class="num">${clusterOf[k] ? "第 " + clusterOf[k] + " 群" : "—"}</td><td class="num"><b>${f.weight == null ? "—" : fmt(f.weight,1) + "%"}</b></td><td class="num muted">${f[alt[1]] == null ? "—" : fmt(f[alt[1]],1) + "%"}</td></tr>`; }).join("")}
+    </tbody></table>${hl.regime_share ? `<p class="hint" style="margin-top:6px">歷史樣本中大盤多頭占 ${pct(hl.regime_share.bull)}、高波動占 ${pct(hl.regime_share.hivol)}。市場狀態欄只供觀察，權重不隨市場狀態調整。</p>` : ""}`;
+  // composite comparison + survivorship
+  const C = hl.composite || {}, sv = C._survivorship;
+  const ck = ["equal_raw", "ir_raw", "ir_neutral", "cluster_neutral", "chosen"].filter(k => C[k] && C[k].ic != null);
+  const mh = C._method_history || {};
+  const best = ck.length ? ck.reduce((a, b) => (C[b].ic > C[a].ic ? b : a)) : null;
+  $("hlComp").innerHTML = ck.length ? `<table class="mq"><thead><tr><th>綜合分數算法</th><th>IC 20日</th><th>IC 60日</th><th>IR</th><th>IC 為正的比例</th><th>五等分報酬差</th></tr></thead><tbody>
+    ${ck.map(k => `<tr${k === best ? ' class="best"' : ""}><td>${COMP_NAMES[k]}</td><td class="num">${ic(C[k].ic)}</td><td class="num">${ic(C[k].ic60)}</td><td class="num">${fmt(C[k].ir,2)}</td><td class="num">${pct(C[k].pos_share)}</td><td class="num ${tone(C[k].q_spread)}">${C[k].q_spread == null ? "—" : (C[k].q_spread > 0 ? "+" : "") + fmt(C[k].q_spread,2) + "%"}</td></tr>`).join("")}
+    </tbody></table><p class="hint" style="margin-top:6px">同一段歷史（${esc(C._from || "")} 起，權重都只用當時已知的資料）用不同方法計算綜合分數，比較預測力，底色為 IC 最高者。系統每季比較後三種算法過去 3 年（只用已知結果）的 IC，選較好的那一種用於下一季，所以「每季自動選擇」這一列才是實際用過的成績。目前使用：<b>${COMP_NAMES[hl.method] || "—"}</b>${Object.keys(mh).length ? `（歷來被選中的季數：${Object.entries(mh).filter(([, n]) => n).map(([k, n]) => `${COMP_NAMES[k]} ${n}`).join("、")}）` : ""}。</p>
+    ${sv ? `<p class="hint" style="margin-top:6px"><b>存活者偏差的影響</b>：把下市、停止交易的股票以最後成交價計入後，綜合分數 20 日 IC ${fmt(sv.ic20_old,3)} → ${fmt(sv.ic20_new,3)}、60 日 IC ${fmt(sv.ic60_old,3)} → ${fmt(sv.ic60_new,3)}，五等分報酬差 ${fmt(sv.q_spread20_old,2)}% → ${fmt(sv.q_spread20_new,2)}%（找回 ${fmt(sv.samples_recovered_60,0)} 筆原本被排除的 60 日樣本）。</p>` : ""}` : `<span class="muted">權重生效滿一段時間後出現。</span>`;
+  // correlation heat map of the latest quarter
+  const cr = hl.corr;
+  if (cr && cr.names?.length > 1){
+    const lab = n => esc((F[n]?.label || n).replace(/\(.*?\)|（.*?）/g, ""));
+    const cell = v => { if (v == null) return `<td></td>`; const a = Math.min(1, Math.abs(v)); const col = v >= 0 ? "var(--accent)" : "var(--warn)";
+      return `<td class="num" style="background:color-mix(in srgb,${col} ${Math.round(a * 85)}%,transparent);${a > .55 ? "color:var(--accent-ink)" : ""}" title="${fmt(v,2)}">${fmt(v,1)}</td>`; };
+    $("hlCorr").innerHTML = `<table class="mq hm"><thead><tr><th></th>${cr.names.map((n, i) => `<th title="${lab(n)}">${i + 1}</th>`).join("")}</tr></thead><tbody>
+      ${cr.names.map((n, i) => `<tr><td>${i + 1}. ${lab(n)}</td>${cr.m[i].map((v, j) => i === j ? `<td class="muted">·</td>` : cell(v)).join("")}</tr>`).join("")}</tbody></table>
+      <p class="hint" style="margin-top:6px">最近一季計算權重時使用的相關係數（過去 3 年平均，已依預期方向調整正負號並扣除產業市值）。≥ 0.5 的因子歸為同一群：${(hl.clusters || []).filter(c => c.length > 1).map((c, i) => `【${c.map(n => lab(n)).join("、")}】`).join("") || "目前沒有高度重疊的因子"}。</p>`;
+  } else $("hlCorr").innerHTML = `<span class="muted">尚無資料。</span>`;
+  // TW: short-selling split test
+  const sb = hl.sbl_split || {}, sk = Object.keys(sb);
+  $("hlSblWrap").hidden = !sk.length;
+  if (sk.length){
+    const c = x => x?.ic == null ? "—" : `${ic(x.ic)} <span class="muted">${x.p == null ? "" : x.p < 0.05 ? "＊" : ""}</span>`;
+    $("hlSbl").innerHTML = `<table class="mq"><thead><tr><th>因子（已依預期方向調整）</th><th>有權證避險的股票</th><th>沒有權證避險</th><th>大型股（市值前 1/3）</th><th>中小型股</th></tr></thead><tbody>
+      ${sk.map(k => `<tr><td>${esc(F[k]?.label || k)}</td><td class="num">${c(sb[k].hedged)}</td><td class="num">${c(sb[k].unhedged)}</td><td class="num">${c(sb[k].large)}</td><td class="num">${c(sb[k].small_mid)}</td></tr>`).join("")}
+      </tbody></table><p class="hint" style="margin-top:6px">20 日 IC，分組後各自排序。「有權證避險」＝近 20 日自營商有避險買賣（代表有發行權證，借券賣出常是避險而不是看空）。＊＝單一檢定 p &lt; 0.05。若方向和預期相反的情形只出現在避險或大型股，代表借券數字混入了避險部位。</p>`;
+  }
 }
 
 // ---------- live track record ----------
+const TRK_ST = {low: ["ng", "低於預期"], ok: ["ok", "在預期內"], high: ["ok2", "優於預期"]};
 function renderTrack(){
   const tk = S.summary[S.market]?.track || {}, lists = tk.lists || {};
   const order = ["up_1q", "gain_1q", "up_1y", "down_1q", "bo_top", "bo"];
   const keys = Object.keys(lists).sort((a, b) => (order.indexOf(a) < 0 ? 99 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 99 : order.indexOf(b)) || a.localeCompare(b));
-  $("trkStatus").textContent = tk.since ? `自 ${tk.since} 開始記錄，已累積 ${fmt(tk.days,0)} 個交易日。` : "尚未開始記錄，下次資料更新後開始。";
+  const warn = keys.filter(k => lists[k].warn);
+  const w = tk.weights;
+  $("trkStatus").innerHTML = tk.since ? `自 ${tk.since} 開始記錄，已累積 ${fmt(tk.days,0)} 個交易日。${w ? `排行名單使用的模型權重：樣本內外 ${w.is}%、機器學習 ${w.ml}%、歷史相似 ${w.an}%。` : ""}${warn.length ? ` <span class="pill ng">注意</span> ${warn.map(k => esc(lists[k].name)).join("、")} 的實戰超額報酬低於回測的預期區間，訊號可能正在失效。` : ""}` : "尚未開始記錄，下次資料更新後開始。";
   if (!keys.length){ $("trkTable").innerHTML = ""; return; }
-  const cell = x => !x || !x.n ? `<td class="num muted" colspan="3">累積中</td>`
-    : `<td class="num">${x.ret > 0 ? "+" : ""}${fmt(x.ret,2)}%</td><td class="num ${tone(x.excess)}"><b>${x.excess > 0 ? "+" : ""}${fmt(x.excess,2)}%</b></td><td class="num">${pct(x.hit)} <span class="muted">(${fmt(x.n,0)})</span></td>`;
+  const sg = v => (v > 0 ? "+" : "") + fmt(v,2) + "%";
+  const cell = x => {
+    if (!x || !x.n) return `<td class="num muted" colspan="4">累積中</td>`;
+    const e = x.expect, st = x.status ? TRK_ST[x.status] : null;
+    const ci = x.ci ? `<br><span class="muted" title="95% 信賴區間（已考慮持有期間重疊）">${sg(x.ci[0])} ~ ${sg(x.ci[1])}</span>` : x.days ? `<br><span class="muted" title="獨立期數 = 名單天數 ÷ 持有天數">獨立期數 ${fmt(x.n_eff,0)}</span>` : "";
+    return `<td class="num">${sg(x.ret)}</td><td class="num ${tone(x.excess)}"><b>${sg(x.excess)}</b>${ci}</td><td class="num">${pct(x.hit)} <span class="muted">(${fmt(x.n,0)})</span></td>
+      <td class="num">${e ? `<span title="回測平均 ${sg(e.mean)}；同樣長度紀錄的 10%～90% 區間">${sg(e.p10)} ~ ${sg(e.p90)}</span>${st ? `<br><span class="pill ${st[0]}">${st[1]}</span>` : `<br><span class="muted">天數不足</span>`}` : `<span class="muted">—</span>`}</td>`;
+  };
   $("trkTable").innerHTML = `<table class="mq"><thead><tr><th>名單</th><th>天數</th><th>檔次</th>
-    ${["20","63","126"].map(h => `<th colspan="3">${h} 日後：報酬／超額／勝率</th>`).join("")}</tr></thead><tbody>
-    ${keys.map(k => { const v = lists[k]; return `<tr><td>${esc(v.name)}</td><td class="num">${fmt(v.days,0)}</td><td class="num">${fmt(v.picks,0)}</td>${["20","63","126"].map(h => cell(v.h?.[h])).join("")}</tr>`; }).join("")}
+    ${["20","63","126"].map(h => `<th colspan="4">${h} 日後：報酬／超額（95% 區間）／勝率／回測預期</th>`).join("")}</tr></thead><tbody>
+    ${keys.map(k => { const v = lists[k]; return `<tr${v.warn ? ' class="warnrow"' : ""}><td>${esc(v.name)}</td><td class="num">${fmt(v.days,0)}</td><td class="num">${fmt(v.picks,0)}</td>${["20","63","126"].map(h => cell(v.h?.[h])).join("")}</tr>`; }).join("")}
     </tbody></table>`;
 }
 
@@ -812,10 +921,12 @@ const BO_RULES = {tight: "波動收斂", higher_low: "低點墊高", vol_surge: 
   trend: "趨勢模板", regime: "大盤多頭", breadth: "廣度佳", peers: "同產業齊漲", fut_long: "外資期貨偏多"};
 // a rule counts as effective when it beat "not met" in at least 65% of tested years, by 5%+ on average,
 // and it actually separates breakouts (met by at most 90% of them)
-function boEffective(rule){
+function boRaw(rule){
   return !!rule && rule.years >= 5 && rule.years_better / rule.years >= 0.65 && rule.yes?.rate != null && rule.no?.rate != null
     && rule.yes.rate > rule.no.rate * 1.05 && rule.share <= 0.9;
 }
+// ...and it must also survive the multiple-testing check (Benjamini-Hochberg over every rule x success definition)
+function boEffective(rule){ return boRaw(rule) && rule.fdr_ok !== false; }
 function boRow(r, x, m, kind, ctx){
   const v = x[BO.mode] || {}, ml = x.ml?.[BO.mode], mv = ctx.mlv;
   const tags = Object.entries(x.f || {}).filter(([k, on]) => on && ctx.eff.has(k)).map(([k]) => `<span class="trait ok">${esc(BO_RULES[k] || k)}</span>`).join(" ");
@@ -852,10 +963,11 @@ function renderBreakout(){
     ${(mlo.importance || []).length ? `<table class="mq"><thead><tr><th>影響最大的因素</th><th>重要度 %</th></tr></thead><tbody>${mlo.importance.slice(0, 8).map(i => `<tr><td>${esc(i.name)}</td><td class="num">${fmt(i.gain,1)}</td></tr>`).join("")}</tbody></table>` : ""}`
     : `<span class="muted">尚無模型結果。</span>`;
   const rk = Object.keys(rules);
-  $("boRules").innerHTML = rk.length ? `<table class="mq"><thead><tr><th>規則</th><th>符合</th><th>不符合</th><th>符合比例</th><th>逐年較好</th><th></th></tr></thead><tbody>
-    ${rk.map(k => { const x = rules[k], e = ctx.eff.has(k);
-      return `<tr${e ? ' class="best"' : ""}><td>${esc(BO_RULES[k] || k)}</td><td class="num">${x.yes?.rate != null ? pct(x.yes.rate) : "—"}</td><td class="num muted">${x.no?.rate != null ? pct(x.no.rate) : "—"}</td><td class="num">${pct(x.share)}</td><td class="num">${x.years_better}/${x.years}</td><td>${e ? '<span class="pill ok2">有效</span>' : ""}</td></tr>`; }).join("")}</tbody></table>
-    <p class="hint" style="margin-top:6px">「有效」：至少 5 個年度中有 65% 以上的年份，符合規則的突破成功率高於不符合者，平均高出 5% 以上，且不是幾乎所有突破都符合（≤ 90%）。規則定義：${Object.entries(bo.patterns?.defs || {}).map(([k, d]) => `${esc(BO_RULES[k] || k)}＝${esc(d)}`).join("；")}。</p>`
+  const fd = bo.patterns?.fdr;
+  $("boRules").innerHTML = rk.length ? `<table class="mq"><thead><tr><th>規則</th><th>符合</th><th>不符合</th><th>符合比例</th><th>逐年較好</th><th title="靠運氣也能贏這麼多年的機率（符號檢定）">p 值</th><th title="Benjamini–Hochberg 校正後的偽發現率">校正後 q</th><th></th></tr></thead><tbody>
+    ${rk.map(k => { const x = rules[k], e = ctx.eff.has(k), raw = boRaw(x);
+      return `<tr${e ? ' class="best"' : ""}><td>${esc(BO_RULES[k] || k)}</td><td class="num">${x.yes?.rate != null ? pct(x.yes.rate) : "—"}</td><td class="num muted">${x.no?.rate != null ? pct(x.no.rate) : "—"}</td><td class="num">${pct(x.share)}</td><td class="num">${x.years_better}/${x.years}</td><td class="num">${x.p == null ? "—" : fmt(x.p,3)}</td><td class="num">${x.q == null ? "—" : fmt(x.q,3)}</td><td>${e ? '<span class="pill ok2">校正後仍有效</span>' : raw ? '<span class="pill third" title="通過原始門檻，但多重檢定校正後不顯著，可能是運氣">僅原始門檻通過</span>' : ""}</td></tr>`; }).join("")}</tbody></table>
+    <p class="hint" style="margin-top:6px">「校正後仍有效」需同時符合：（1）原始門檻：至少 5 個年度中有 65% 以上的年份，符合規則的突破成功率高於不符合者，平均高出 5% 以上，且不是幾乎所有突破都符合（≤ 90%）；（2）多重檢定：p 值是「規則其實沒用、純靠運氣也能贏這麼多年」的機率（符號檢定），這個市場同時檢驗了 ${fd?.tests ?? "多"} 個「規則 × 成功標準」，用 Benjamini–Hochberg 方法校正後的 q 值須 ≤ ${pct(fd?.q ?? 0.1)}。只過（1）的標示「僅原始門檻通過」，不列入有效型態。規則定義：${Object.entries(bo.patterns?.defs || {}).map(([k, d]) => `${esc(BO_RULES[k] || k)}＝${esc(d)}`).join("；")}。</p>`
     : `<span class="muted">尚無規則驗證結果。</span>`;
   $("boRows").innerHTML = brk.length ? brk.slice(0, BO.shown).map(x => boRow(byC.get(x.c), x, m, "brk", ctx)).join("") : empty("最近 5 個交易日沒有符合條件的突破。");
   $("boNear").innerHTML = near.length ? near.slice(0, BO.shown).map(x => boRow(byC.get(x.c), x, m, "near", ctx)).join("") : empty("目前沒有接近一年高點的股票。");

@@ -606,7 +606,10 @@ def build_factors(store: Store, since: str = "2012-01-01"):
         if not d.empty:
             codes |= set(d["code"].unique())
     if not uni.empty:
-        codes &= set(uni["code"]) | set(inst["code"].unique() if not inst.empty else [])
+        # keep today's listings, anything with 法人 data, and every common stock that ever had an official
+        # close - stocks delisted before 2018 must stay in, or the backtests only see survivors
+        codes &= set(uni["code"]) | set(inst["code"].unique() if not inst.empty else []) | \
+            {c for c in (quote["code"].unique() if not quote.empty else []) if STOCK_RE.match(str(c))}
     codes = pd.Index(sorted(codes), name="code")
 
     W = lambda df, col, lim=0: wide(df, col, cal, codes, lim)

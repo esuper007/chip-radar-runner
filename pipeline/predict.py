@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .common import log
-from .factors import FactorSet
+from .factors import FactorSet, exit_price
 
 HORIZONS = {"1q": 63, "6m": 126, "1y": 252}
 SAMPLE_EVERY = 5          # use one training row per stock per week
@@ -49,9 +49,10 @@ def feature_panel(fs: FactorSet, scores: dict[str, pd.DataFrame], dates: pd.Date
 
 def labels(fs: FactorSet, dates: pd.DatetimeIndex) -> pd.DataFrame:
     px = fs.price
+    ex = exit_price(px)            # a delisted stock keeps its last traded price (no survivorship bias)
     out = {}
     for hk, h in HORIZONS.items():
-        fwd = (px.shift(-h) / px - 1) * 100
+        fwd = (ex.shift(-h) / px - 1) * 100
         out[f"y_{hk}"] = fwd.reindex(dates).stack(future_stack=True)
     y = pd.concat(out, axis=1)
     y.index.names = ["date", "code"]
@@ -164,6 +165,7 @@ def backtest(X: pd.DataFrame, Y: pd.DataFrame, cal: pd.DatetimeIndex, first_test
     if first_test_year is None:
         first_test_year = years[0] + 4 if len(years) > 6 else years[min(2, len(years) - 1)]
     out = {}
+    bt_preds, calib = {}, {}
     for hk, h in HORIZONS.items():
         y = Y[f"y_{hk}"]
         preds_ml, preds_an, score_rows = [], [], []
@@ -191,15 +193,35 @@ def backtest(X: pd.DataFrame, Y: pd.DataFrame, cal: pd.DatetimeIndex, first_test
             preds_an.append(analog_predict(X.iloc[tr_idx], y.iloc[tr_idx], X.iloc[q_idx], max_pool=BT_ANALOG_POOL))
             log.info("backtest %s %d: train=%d test=%d", hk, yr, tr.sum(), te.sum())
         res = {}
+        P = {}
         if preds_ml:
-            res["ml"] = _metrics(pd.concat(preds_ml), y)
+            P["ml"] = pd.concat(preds_ml)
+            res["ml"] = _metrics(P["ml"], y)
         if preds_an:
-            res["analog"] = _metrics(pd.concat(preds_an), y)
+            P["an"] = pd.concat(preds_an)
+            res["analog"] = _metrics(P["an"], y)
+        iso = is_oos_fit(X, y, h, cal)
+        if iso is not None:
+            P["is"] = iso["oos_pred"]
+        bt_preds[hk] = P
+        for mk, pr in P.items():
+            c = _calibrate(pr, y, cal, h)
+            if c:
+                calib.setdefault(mk, {})[hk] = c
         if "score" in X:
             sc = X[["score"]].rename(columns={"score": "p_up"})
             res["score_only"] = {k: v for k, v in _metrics(sc[dates >= pd.Timestamp(f"{first_test_year}-01-01")], y).items()
                                  if k in ("n", "rank_ic", "ic_ir", "top_minus_bottom_pct")}
         out[hk] = res
+    out["calib"] = calib
+    try:
+        out["blend"] = _blend_weights(bt_preds, Y, calib)
+    except Exception:
+        log.exception("blend weights failed")
+    try:
+        out["_picks"] = _list_picks(bt_preds, calib, out.get("blend"))
+    except Exception:
+        log.exception("backtest list picks failed")
     # which chip groups actually predicted returns (rank IC of each sub-score)
     out["group_ic"] = {}
     for c in [c for c in X.columns if c.startswith("s_")]:
@@ -210,6 +232,145 @@ def backtest(X: pd.DataFrame, Y: pd.DataFrame, cal: pd.DatetimeIndex, first_test
                 ics.append(g[c].rank().corr(g["y_1q"].rank()))
         if ics:
             out["group_ic"][c] = round(float(np.nanmean(ics)), 3)
+    return out
+
+
+# ---------------------------------------------------------------- calibration and blend weights
+CAL_BINS = np.linspace(0, 1, 11)
+
+
+def _bins(p: np.ndarray, up: np.ndarray) -> list[dict]:
+    """Reliability table: predicted probability in 10 bins vs how often the stock really went up."""
+    out = []
+    for lo, hi in zip(CAL_BINS[:-1], CAL_BINS[1:]):
+        m = (p >= lo) & ((p < hi) if hi < 1 else (p <= hi))
+        if m.sum() >= 30:
+            out.append({"lo": round(float(lo), 1), "p": round(float(p[m].mean()), 3),
+                        "up": round(float(up[m].mean()), 3), "n": int(m.sum())})
+    return out
+
+
+def _calibrate(pred: pd.DataFrame, y: pd.Series, cal: pd.DatetimeIndex, h: int) -> dict | None:
+    """Walk-forward isotonic calibration of p_up: for each test year, fit on out-of-sample predictions whose
+    outcome was known before that year starts, apply to the year. Kept only if it lowers the Brier score."""
+    from sklearn.isotonic import IsotonicRegression
+    d = pred[["p_up"]].join(y.rename("y")).dropna()
+    if len(d) < 3000:
+        return None
+    dates = d.index.get_level_values("date")
+    p, up = d["p_up"].values.astype("float64"), (d["y"].values > 0).astype("float64")
+    pc = np.full(len(d), np.nan)
+    for yr in sorted(set(dates.year)):
+        start = pd.Timestamp(f"{yr}-01-01")
+        cut = cal[max(0, cal.searchsorted(start) - h - 1)]
+        fit, te = dates <= cut, dates.year == yr
+        if fit.sum() < 3000 or te.sum() == 0 or up[fit].min() == up[fit].max():
+            continue
+        iso = IsotonicRegression(out_of_bounds="clip", y_min=0.05, y_max=0.95).fit(p[fit], up[fit])
+        pc[te] = iso.predict(p[te])
+    ev = np.isfinite(pc)
+    res = {"n": int(len(d)), "bins_raw": _bins(p, up), "brier_all": round(float(np.mean((p - up) ** 2)), 4)}
+    if ev.sum() >= 1000:
+        res["n_eval"] = int(ev.sum())
+        res["brier_raw"] = round(float(np.mean((p[ev] - up[ev]) ** 2)), 4)
+        res["brier_cal"] = round(float(np.mean((pc[ev] - up[ev]) ** 2)), 4)
+        res["bins_cal"] = _bins(pc[ev], up[ev])
+        res["apply"] = bool(res["brier_cal"] < res["brier_raw"] * 0.995)
+    else:
+        res["apply"] = False
+    iso = IsotonicRegression(out_of_bounds="clip", y_min=0.05, y_max=0.95).fit(p, up)
+    xs, ys = iso.X_thresholds_, iso.y_thresholds_
+    if len(xs) > 80:
+        k = np.linspace(0, len(xs) - 1, 80).astype(int)
+        xs, ys = xs[k], ys[k]
+    res["map"] = {"x": [round(float(v), 4) for v in xs], "y": [round(float(v), 4) for v in ys]}
+    return res
+
+
+def apply_calibration(p: np.ndarray, c: dict | None) -> np.ndarray:
+    if not c or not c.get("apply") or not c.get("map"):
+        return p
+    return np.interp(p, c["map"]["x"], c["map"]["y"])
+
+
+def _cal_p(P: dict, calib: dict, hk: str, mk: str) -> pd.Series:
+    return pd.Series(apply_calibration(P[mk]["p_up"].values, (calib.get(mk) or {}).get(hk)), index=P[mk].index)
+
+
+def _daily_ic(score: pd.Series, y: pd.Series) -> float | None:
+    d = pd.DataFrame({"s": score, "y": y}).dropna()
+    ics = [g["s"].rank().corr(g["y"].rank()) for _, g in d.groupby(level="date") if len(g) >= 30]
+    return float(np.nanmean(ics)) if ics else None
+
+
+BLEND_DEFAULT = {"is": 70, "ml": 15, "an": 15}
+
+
+def _blend_weights(bt_preds: dict, Y: pd.DataFrame, calib: dict) -> dict | None:
+    """Weights of the three models for the ranking blend, from out-of-sample rows where all three exist:
+    the grid weights (5% steps) with the highest average daily rank IC over the three horizons, shrunk
+    halfway toward the default 70/15/15 so a lucky grid point cannot dominate."""
+    sets = {}
+    for hk, P in bt_preds.items():
+        if not all(k in P for k in ("is", "ml", "an")):
+            continue
+        J = pd.concat({k: _cal_p(P, calib, hk, k) for k in ("is", "ml", "an")}, axis=1).join(Y[f"y_{hk}"].rename("y")).dropna()
+        if J.index.get_level_values("date").nunique() >= 12:
+            sets[hk] = J
+    if not sets:
+        return None
+    grid = [(a, b, 100 - a - b) for a in range(0, 101, 5) for b in range(0, 101 - a, 5)]
+
+    def score(w):
+        vals = []
+        for J in sets.values():
+            s = (J["is"] * w[0] + J["ml"] * w[1] + J["an"] * w[2]) / 100
+            v = _daily_ic(s, J["y"])
+            if v is not None:
+                vals.append(v)
+        return float(np.mean(vals)) if vals else -1
+
+    res = {w: score(w) for w in grid}
+    best = max(res, key=res.get)
+    d = BLEND_DEFAULT
+    final = [round((best[i] + d[k]) / 2) for i, k in enumerate(("is", "ml", "an"))]
+    final[0] += 100 - sum(final)
+    d = BLEND_DEFAULT
+    out = {"weights": dict(zip(("is", "ml", "an"), final)), "best_grid": dict(zip(("is", "ml", "an"), best)),
+           "ic": {"best_grid": round(res[best], 4), "final": round(score(tuple(final)), 4),
+                  "default": round(score((d["is"], d["ml"], d["an"])), 4), "equal": round(score((34, 33, 33)), 4),
+                  "is_only": round(res[(100, 0, 0)], 4), "ml_only": round(res[(0, 100, 0)], 4), "an_only": round(res[(0, 0, 100)], 4)},
+           "n_dates": {hk: int(J.index.get_level_values("date").nunique()) for hk, J in sets.items()},
+           "period": {hk: f"{J.index.get_level_values('date').min().date()} ~ {J.index.get_level_values('date').max().date()}" for hk, J in sets.items()},
+           "quarter": str(pd.Timestamp.today().to_period("Q"))}
+    log.info("blend weights: %s (avg IC final=%s default=%s)", out["weights"], out["ic"]["final"], out["ic"]["default"])
+    return out
+
+
+def _list_picks(bt_preds: dict, calib: dict, blend: dict | None, topn: int = 20) -> dict:
+    """The daily lists of the live track record, rebuilt on the backtest (weekly, out of sample), so the live
+    results can be compared with what history says to expect. Uses the in/out-of-sample model and LightGBM
+    (the analog model only scores a sample of stocks in the backtest), renormalized to their blend weights."""
+    w = (blend or {}).get("weights") or BLEND_DEFAULT
+    out = {}
+    for hk, lists in (("1q", (("up_1q", "p", -1), ("down_1q", "p", 1), ("gain_1q", "q", -1))), ("1y", (("up_1y", "p", -1),))):
+        P = bt_preds.get(hk) or {}
+        if not ("is" in P and "ml" in P):
+            continue
+        wi, wm = w["is"] / (w["is"] + w["ml"]), w["ml"] / (w["is"] + w["ml"])
+        J = pd.DataFrame({"pi": _cal_p(P, calib, hk, "is"), "pm": _cal_p(P, calib, hk, "ml"),
+                          "qi": P["is"]["q50"], "qm": P["ml"]["q50"]}).dropna()
+        J["p"] = J["pi"] * wi + J["pm"] * wm
+        J["q"] = J["qi"] * wi + J["qm"] * wm
+        for name, col, direction in lists:
+            rows = []
+            for d, g in J.groupby(level="date"):
+                if len(g) < topn * 3:
+                    continue
+                g = g.sort_values(col, ascending=direction > 0).head(topn)
+                rows.append(pd.DataFrame({"date": d, "code": g.index.get_level_values("code")}))
+            if rows:
+                out[name] = pd.concat(rows, ignore_index=True)
     return out
 
 
@@ -277,10 +438,11 @@ def is_oos_fit(X: pd.DataFrame, y: pd.Series, h: int, cal: pd.DatetimeIndex) -> 
     rq = np.percentile(resid, [10, 50, 90])
     oos_m = _basic_metrics(qo, po, y[oos].values, dates[oos])
     oos_m["coverage_80"] = round(float(((resid >= rq[0]) & (resid <= rq[2])).mean()), 3)
+    oos_pred = pd.DataFrame({"p_up": qo, "q50": po + rq[1]}, index=X.index[oos])
     coef = pd.Series(reg.coef_, index=cols)
     top = coef.reindex(coef.abs().sort_values(ascending=False).index).head(12)
     return {
-        "reg": reg, "clf": clf, "cols": cols, "resid_q": rq.tolist(),
+        "reg": reg, "clf": clf, "cols": cols, "resid_q": rq.tolist(), "oos_pred": oos_pred,
         "metrics": {
             "in_sample": _basic_metrics(qi, pi, y[ins].values, dates[ins]),
             "out_of_sample": oos_m,
@@ -328,6 +490,7 @@ def train_models(fs: FactorSet, scores) -> dict:
         bundle["info"]["importance"][hk] = feature_importance(hz["ml"], X.columns)
         iso = is_oos_fit(X, y, h, fs.calendar)
         if iso:
+            iso.pop("oos_pred", None)
             hz["is"] = iso
             bundle["info"]["is_oos"][hk] = iso["metrics"]
         bundle["horizons"][hk] = hz
@@ -335,7 +498,9 @@ def train_models(fs: FactorSet, scores) -> dict:
     return bundle
 
 
-def forecast(fs: FactorSet, scores, bundle: dict, asof: pd.Timestamp | None = None) -> tuple[pd.DataFrame, dict]:
+def forecast(fs: FactorSet, scores, bundle: dict, asof: pd.Timestamp | None = None,
+             calib: dict | None = None) -> tuple[pd.DataFrame, dict]:
+    """calib: {model: {horizon: calibration}} from the backtest; applied to p_up where it helped out of sample."""
     asof = asof or fs.calendar[-1]
     Xq = feature_panel(fs, scores, pd.DatetimeIndex([asof]))
     Xq = Xq[Xq["score"].notna()] if "score" in Xq else Xq
@@ -348,5 +513,10 @@ def forecast(fs: FactorSet, scores, bundle: dict, asof: pd.Timestamp | None = No
         if "is" in hz:
             frames.append(is_predict(hz["is"], Xq).add_prefix(f"is_{hk}_"))
     res = pd.concat(frames, axis=1) if frames else pd.DataFrame(index=Xq.index)
+    for col in [c for c in res.columns if c.endswith("_p_up")]:
+        mk, hk = col.split("_")[:2]
+        c = ((calib or {}).get("an" if mk == "an" else mk) or {}).get(hk)
+        if c and c.get("apply"):
+            res[col] = apply_calibration(res[col].values.astype("float64"), c)
     res = res.reset_index(level="date", drop=True)
     return res, bundle["info"]

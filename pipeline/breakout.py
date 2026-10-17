@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 from .common import log
-from .factors import FactorSet, xrank
+from .factors import FDR_Q, FactorSet, bh_qvalues, exit_price, sign_test_p, xrank
 from .surge import GROUPS, _Win, _fit, _score, _series, quarter_end
 
 HIGH_LOOKBACK = 250
@@ -98,9 +98,10 @@ class _Ctx:
         self.event = newhi & ~recent_hi & self.liq & has
         # forward returns and their same-day percentile among liquid stocks, per horizon
         self.fwd, self.fpct = {}, {}
+        ev_ = exit_price(px).values.astype("float64")     # delisted stocks keep their last traded price
         for h in {h for h, _ in MODES.values()}:
             with np.errstate(all="ignore"):
-                f = pv[h:] / pv[:-h] - 1 if h < self.T else np.empty((0, pv.shape[1]))
+                f = ev_[h:] / pv[:-h] - 1 if h < self.T else np.empty((0, pv.shape[1]))
             f = np.vstack([f, np.full((min(h, self.T), pv.shape[1]), np.nan)])
             f = np.where(self.liq, f, np.nan)
             self.fwd[h] = f.astype("float32")
@@ -370,7 +371,9 @@ def patterns(ctx: _Ctx) -> dict:
             wins = sum(1 for x in yr if x["yes"] > x["no"])
             m["rules"][k] = {"yes": _rate(succ, fwd, yes), "no": _rate(succ, fwd, no),
                              "share": round(float(yes.sum() / max(has.sum(), 1)), 3),
-                             "years_better": wins, "years": len(yr), "per_year": yr}
+                             "years_better": wins, "years": len(yr), "per_year": yr,
+                             # chance of being better in this many years by pure luck (sign test)
+                             "p": round(sign_test_p(wins, len(yr)), 4) if yr else None}
         if "tight" in flags and "higher_low" in flags:
             t1, h1 = flags["tight"] == 1, flags["higher_low"] == 1
             m["combo"] = {"both": _rate(succ, fwd, known & t1 & h1), "tight_only": _rate(succ, fwd, known & t1 & ~h1),
@@ -382,6 +385,14 @@ def patterns(ctx: _Ctx) -> dict:
         out["modes"][mode] = m
         log.info("patterns %s: all=%s %s", mode, m["all"].get("rate"),
                  {k: (v["yes"].get("rate"), v["no"].get("rate"), f'{v["years_better"]}/{v["years"]}') for k, v in m["rules"].items()})
+    # multiple testing: every rule x success definition of this market is one test (Benjamini-Hochberg)
+    pv = {(mode, k): r.get("p") for mode, mm in out["modes"].items() for k, r in mm["rules"].items()}
+    qv = bh_qvalues(pv)
+    for (mode, k), q in qv.items():
+        r = out["modes"][mode]["rules"][k]
+        r["q"] = q
+        r["fdr_ok"] = bool(q is not None and q <= FDR_Q)
+    out["fdr"] = {"q": FDR_Q, "tests": sum(1 for v in pv.values() if v is not None)}
     return out
 
 
@@ -417,7 +428,7 @@ def ml_validate(ctx: _Ctx, mode: str, L: int) -> dict:
     names, X = _ml_matrix(ctx, L)
     known, succ, fwd = ctx.outcome(mode)
     cal = ctx.fs.calendar
-    per_year, scored = [], []
+    per_year, scored, top_ev = [], [], []
     n_top = n_all = s_top = s_all = f_top = f_all = 0.0
     for y in sorted(set(ctx.ev_year)):
         test = (ctx.ev_year == y) & known
@@ -438,6 +449,7 @@ def ml_validate(ctx: _Ctx, mode: str, L: int) -> dict:
         n_top += top.sum(); n_all += len(te); s_top += st * top.sum(); s_all += sa * len(te)
         f_top += ft * top.sum(); f_all += fa * len(te)
         scored.append(np.column_stack([np.minimum((pct * 5).astype(int), 4), succ[te]]))
+        top_ev.append(te[top])
     if not per_year:
         return {"n_years": 0}
     top_rate, base_rate = s_top / max(n_top, 1), s_all / max(n_all, 1)
@@ -449,6 +461,7 @@ def ml_validate(ctx: _Ctx, mode: str, L: int) -> dict:
     return {"n_years": len(per_year), "n_events": int(n_all), "top_rate": round(top_rate, 3),
             "base_rate": round(base_rate, 3), "lift": round(lift, 2) if lift else None, "excess": round(excess, 2),
             "quintiles": quint, "per_year": per_year, "years_better": years_better,
+            "_top_events": np.concatenate(top_ev) if top_ev else np.array([], int),
             "valid": bool(len(per_year) >= 3 and (lift or 0) >= 1.3 and excess > 0)}
 
 
@@ -558,6 +571,7 @@ def compute(fs: FactorSet, scores: dict, store=None) -> dict | None:
         for k in ("rr", "vr", "vs", "rs"):
             if k in src and np.isfinite(src[k][0]):
                 today[int(c)][k] = round(float(src[k][0]), 2)
+    res["_expect_picks"] = {"bo": pd.DataFrame({"date": fs.calendar[ctx.ev_r], "code": fs.codes[ctx.ev_c]})}
     try:
         res["patterns"] = patterns(ctx)
     except Exception:
@@ -568,6 +582,11 @@ def compute(fs: FactorSet, scores: dict, store=None) -> dict | None:
         try:
             L = (res["modes"].get(mode) or {}).get("L", LATE)
             v = ml_validate(ctx, mode, L)
+            te = v.pop("_top_events", None)
+            if mode == "h126q10" and te is not None and len(te):
+                # out-of-sample top-fifth breakouts: what the live "bo_top" list should look like
+                res.setdefault("_expect_picks", {})["bo_top"] = pd.DataFrame(
+                    {"date": fs.calendar[ctx.ev_r[te]], "code": fs.codes[ctx.ev_c[te]]})
             ok = tail_ok
             imp, sc = ml_today(ctx, mode, L, rows_all[ok], cols[ok], v.get("quintiles"))
             res["ml"][mode] = {"L": L, "validation": v, "valid": v.get("valid", False), "importance": imp or []}

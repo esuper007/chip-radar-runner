@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 from .common import log
-from .factors import FactorSet
+from .factors import FDR_Q, FactorSet, bh_qvalues, exit_price, t_test_p
 
 HORIZONS = {"20": 20, "63": 63}
 IS_SHARE = 0.7
@@ -111,7 +111,7 @@ def evaluate(fs: FactorSet, events: dict[str, pd.DataFrame]) -> dict:
     out = {}
     fw = {}
     for hk, h in HORIZONS.items():
-        fwd = (px.shift(-h) / px - 1).values * 100
+        fwd = (exit_price(px).shift(-h) / px - 1).values * 100
         fwd = np.where(liq, fwd, np.nan)
         import warnings
         with warnings.catch_warnings():
@@ -145,10 +145,28 @@ def evaluate(fs: FactorSet, events: dict[str, pd.DataFrame]) -> dict:
         res["valid"] = bool(o.get("n", 0) >= MIN_OOS_EVENTS and o.get("excess", -1) >= MIN_EXCESS_20
                             and o.get("beat", 0) >= MIN_BEAT_20 and o63.get("excess", -1) > 0
                             and o.get("hit", 0) >= b.get("hit", 1))
+        # p-value for "beats the market out of sample": monthly averages of event excess returns are close to
+        # independent (events on nearby days share the same market move), one-sided t-test on them
+        sel = e & oos_rows[:, None] & ~np.isnan(fw["20"][1])
+        rr, cc = np.where(sel)
+        if len(rr) >= 20:
+            mon = pd.Series(fw["20"][1][rr, cc], index=cal[rr].to_period("M")).groupby(level=0).mean()
+            pv = t_test_p(mon.values)
+            res["p"] = round(pv, 4) if pv is not None else None
+            res["n_months"] = int(len(mon))
+        else:
+            res["p"] = None
+        res["oos_from"] = str(cal[min(len(cal) - 1, split + HORIZONS["63"])].date())
         res["split"] = {"is": f"{cal[kd[0]].date()} ~ {cal[split - 1].date()}",
                         "oos": f"{cal[min(len(cal) - 1, split + HORIZONS['63'])].date()} ~ {cal[kd[-1]].date()}"}
         out[k] = res
         log.info("signal %s: oos n=%s excess20=%s beat20=%s valid=%s", k, o.get("n"), o.get("excess"), o.get("beat"), res["valid"])
+    qv = bh_qvalues({k: r.get("p") for k, r in out.items()})
+    for k, r in out.items():
+        r["q"] = qv.get(k)
+        r["fdr_ok"] = bool(qv.get(k) is not None and qv[k] <= FDR_Q)
+        r["valid_raw"] = r["valid"]
+        r["valid"] = bool(r["valid"] and r["fdr_ok"])       # must also survive the multiple-testing check
     return out
 
 

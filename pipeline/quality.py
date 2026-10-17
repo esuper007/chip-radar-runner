@@ -94,8 +94,54 @@ CHECK_NAMES = {
 }
 
 
+# Survivorship check: which dataset tells us about stocks that existed but no longer trade
+SURVIVOR_REF = {
+    "tw": ("quote", "證交所／櫃買中心官方每日收盤行情（含已下市股票）", True),
+    "cn": ("delisted", "上交所／深交所官方終止上市名單", True),
+    "us": ("insider", "SEC 內部人申報（有申報、但查不到股價的公司代號）", False),
+    "hk": ("shortpos", "證監會淡倉申報（有申報、但查不到股價的股票）", False),
+    "jp": ("short_pos", "東證空賣餘額報告（有報告、但查不到股價的股票）", False),
+}
+
+
+def survivorship(store: Store, fs) -> dict:
+    """How many stocks that stopped trading are inside the backtests, and an estimate of how many are missing."""
+    px, cal = fs.price, fs.calendar
+    last = px.apply(lambda s: s.last_valid_index())
+    ended = last[last.notna() & (last < cal[max(0, len(cal) - 21)])]
+    liq = fs.liquid.fillna(False) if fs.liquid is not None else None
+    ever = int(liq[ended.index].any().sum()) if liq is not None and len(ended) else len(ended)
+    by_year = pd.Series(pd.to_datetime(ended.values).year).value_counts().sort_index()
+    out = {"included": int(len(ended)), "included_liquid": ever, "by_year": {str(k): int(v) for k, v in by_year.items()}}
+    ref = SURVIVOR_REF.get(fs.market)
+    if ref:
+        name, desc, complete = ref
+        df = store.load(name)
+        missing = None
+        if not df.empty and "code" in df.columns:
+            d = df.copy()
+            d["date"] = pd.to_datetime(d["date"])
+            lastref = d.groupby(d["code"].astype(str))["date"].max()
+            codes = set(map(str, fs.codes))
+            gone = lastref[(~lastref.index.isin(codes)) & ((lastref < d["date"].max() - pd.Timedelta(days=30)) | (name == "delisted"))]
+            if name == "delisted":
+                priced = set(map(str, ended.index)) | codes
+                gone = lastref[~lastref.index.isin(priced)]
+            if fs.market == "tw":
+                import re
+                gone = gone[[bool(re.match(r"^[1-9]\d{3}$", c)) for c in gone.index]]
+            missing = int(len(gone))
+        out.update({"ref": desc, "ref_complete": complete, "missing": missing})
+        out["status"] = ("fixed" if missing == 0 else "partial" if complete else "not_fixable") if missing is not None else "unknown"
+    return out
+
+
 def report(store: Store, fs, datasets: list[str], sources: dict) -> dict:
     checks = fetch_checks(store) + list(getattr(fs, "quality", []) or []) + completeness(store, datasets, fs.calendar)
     n_fail = sum(1 for c in checks if not c["ok"])
-    return {"checks": checks, "n_fail": n_fail, "n": len(checks),
+    try:
+        surv = survivorship(store, fs)
+    except Exception as e:                      # never block the build on this report
+        surv = {"error": type(e).__name__}
+    return {"checks": checks, "n_fail": n_fail, "n": len(checks), "survivorship": surv,
             "sources": [{"dataset": k, "source": v[0], "official": v[1]} for k, v in sources.items()]}
