@@ -80,7 +80,7 @@ def _features(wins: dict, rows: np.ndarray, cols: np.ndarray, L: int):
 class _Ctx:
     """Everything shared by all windows and modes for one market."""
 
-    def __init__(self, fs: FactorSet, scores: dict):
+    def __init__(self, fs: FactorSet, scores: dict, store=None):
         self.fs = fs
         cal, px = fs.calendar, fs.price
         self.T = len(cal)
@@ -114,20 +114,86 @@ class _Ctx:
         self.ev_r, self.ev_c = r, c
         self.ev_year = cal[r].year.values if len(r) else np.array([], int)
         self._feat = {}
-        # price patterns before the breakout (closes only; every window ends the day BEFORE row t)
-        p1 = px.shift(1)
+        self._price_features(fs, store)
+
+    TAIL = 6       # keep the last rows (recent breakouts + "tomorrow" for near-highs) of every price feature
+
+    def _price_features(self, fs: FactorSet, store) -> None:
+        """Price / volume features as of the day BEFORE each row, kept only at event points and the last rows.
+        Row T (one past the data) = what a breakout tomorrow would see; used for stocks near their high."""
+        cal, px = fs.calendar, fs.price
+        T = self.T
+        ext = cal.append(pd.DatetimeIndex([cal[-1] + pd.Timedelta(days=1)]))
+        pe = px.reindex(ext)
+        p1 = pe.shift(1)
+        liq_e = np.vstack([self.liq, self.liq[-1:]])
+        vol = None
+        if store is not None:
+            try:
+                from .factors import wide
+                vol = wide(store.load("price"), "volume", cal, fs.codes).reindex(ext)
+            except Exception as e:
+                log.warning("breakout: volume unavailable (%s)", e)
+        self.pf_ev, self.pf_tail = {}, {}
+        r, c = self.ev_r, self.ev_c
+
+        def keep(name, frame):
+            a = frame.values if hasattr(frame, "values") else frame
+            a = np.asarray(a, dtype="float32")
+            self.pf_ev[name] = a[r, c]
+            self.pf_tail[name] = a[T + 1 - self.TAIL:T + 1].copy()
+
         with np.errstate(all="ignore"):
-            rng_s = (p1.rolling(PAT_SHORT, min_periods=PAT_SHORT).max() - p1.rolling(PAT_SHORT, min_periods=PAT_SHORT).min()) / p1
-            rng_l = (p1.rolling(PAT_LONG, min_periods=PAT_LONG).max() - p1.rolling(PAT_LONG, min_periods=PAT_LONG).min()) / p1
-            ret1 = np.log(p1 / p1.shift(1))
-            vol_s = ret1.rolling(PAT_SHORT, min_periods=PAT_SHORT - 2).std()
-            vol_l = ret1.rolling(PAT_LONG, min_periods=PAT_LONG - 5).std()
-            self.range_ratio = (rng_s / rng_l).values.astype("float32")
-            self.vol_ratio = (vol_s / vol_l).values.astype("float32")
-            low_recent = p1.rolling(PAT_SHORT, min_periods=PAT_SHORT).min()
-            low_before = px.shift(PAT_SHORT + 1).rolling(PAT_LONG - PAT_SHORT, min_periods=PAT_LONG - PAT_SHORT).min()
-            hl = (low_recent > low_before).values
-            self.higher_low = np.where(np.isfinite(low_recent.values) & np.isfinite(low_before.values), hl, np.nan).astype("float32")
+            mx = lambda n: p1.rolling(n, min_periods=n).max()
+            mn = lambda n: p1.rolling(n, min_periods=n).min()
+            keep("rr", (mx(PAT_SHORT) - mn(PAT_SHORT)) / (mx(PAT_LONG) - mn(PAT_LONG)))
+            lr = np.log(p1 / p1.shift(1))
+            keep("vr", lr.rolling(PAT_SHORT, min_periods=PAT_SHORT - 2).std() / lr.rolling(PAT_LONG, min_periods=PAT_LONG - 5).std())
+            lo_r, lo_b = mn(PAT_SHORT), pe.shift(PAT_SHORT + 1).rolling(PAT_LONG - PAT_SHORT, min_periods=PAT_LONG - PAT_SHORT).min()
+            keep("hl", np.where(np.isfinite(lo_r.values) & np.isfinite(lo_b.values), (lo_r.values > lo_b.values), np.nan))
+            ma = {n: p1.rolling(n, min_periods=int(n * 0.9)).mean() for n in (50, 150, 200)}
+            trend = (p1 > ma[50]) & (ma[50] > ma[150]) & (ma[150] > ma[200]) & (ma[200] > ma[200].shift(22))
+            keep("trend", np.where(ma[200].notna().values & ma[200].shift(22).notna().values, trend.values, np.nan))
+            keep("d50", p1 / ma[50] - 1)
+            keep("d200", p1 / ma[200] - 1)
+            keep("ret20", p1 / p1.shift(20) - 1)
+            keep("ret60", p1 / p1.shift(60) - 1)
+            r250 = (p1 / p1.shift(250) - 1).where(liq_e)
+            keep("rs", r250.rank(axis=1, pct=True))
+            # market: equal-weighted index of liquid stocks vs its 200-day average, and breadth
+            dr = (pe / pe.shift(1) - 1).where(np.vstack([np.zeros((1, liq_e.shape[1]), bool), liq_e[:-1]]))
+            idx = (1 + dr.clip(-0.5, 1).mean(axis=1).fillna(0)).cumprod()
+            reg = (idx > idx.rolling(200, min_periods=150).mean()).astype("float32").shift(1)
+            above = (p1 > ma[200]).where(liq_e & ma[200].notna().values)
+            br = above.mean(axis=1).shift(0)
+            keep("regime", np.repeat(reg.values[:, None], pe.shape[1], axis=1))
+            keep("breadth", np.repeat(br.values[:, None], pe.shape[1], axis=1))
+            if vol is not None and vol.notna().values.any():
+                v = vol.where(vol > 0)
+                keep("vs", v / v.shift(1).rolling(50, min_periods=40).mean())          # breakout-day volume
+                chg = (pe - pe.shift(1)).shift(1)               # price change of the day before each row
+                v1 = v.shift(1)
+                okd = v1.notna() & chg.notna()
+                upv = (v1 * (chg > 0)).where(okd).rolling(50, min_periods=40).sum()
+                dnv = (v1 * (chg < 0)).where(okd).rolling(50, min_periods=40).sum()
+                keep("ud", upv / dnv.where(dnv > 0))
+        # industry heat: other fresh breakouts in the same industry over the last 10 sessions
+        ind = None
+        try:
+            ind = fs.meta.reindex(fs.codes)["industry"].fillna("").astype(str).values
+        except Exception:
+            pass
+        if ind is not None and (ind != "").any():
+            ev = pd.DataFrame(self.event.astype("float32")).rolling(10, min_periods=1).sum().values
+            g = pd.Series(ind)
+            peers = np.zeros_like(ev)
+            for name, cols in g.groupby(g).groups.items():
+                if not name:
+                    continue
+                cols = np.asarray(list(cols))
+                peers[:, cols] = ev[:, cols].sum(axis=1, keepdims=True) - ev[:, cols]
+            peers = np.vstack([peers, peers[-1:]])
+            keep("peers", peers)
 
     def feats(self, L: int):
         if L not in self._feat:
@@ -247,51 +313,171 @@ def _rate(succ, fwd, m):
             "ret": round(float(np.nanmean(np.clip(fwd[m], -0.9, 5))) * 100, 2)}
 
 
+FLAGS = {   # fixed rules (no fitting); name -> (label, function of the feature dict)
+    "tight": ("波動收斂（22 日區間 < 123 日區間的 40%）", lambda f: f["rr"] < RANGE_MAX),
+    "higher_low": ("低點墊高", lambda f: f["hl"] == 1),
+    "vol_surge": ("突破日量 ≥ 50 日均量 1.5 倍", lambda f: f["vs"] >= 1.5),
+    "accum": ("前 50 日上漲量 > 下跌量", lambda f: f["ud"] > 1),
+    "rs70": ("一年漲幅排名前 30%", lambda f: f["rs"] >= 0.7),
+    "trend": ("趨勢模板（股價 > 50 > 150 > 200 日線且 200 日線上升）", lambda f: f["trend"] == 1),
+    "regime": ("大盤在 200 日均線之上", lambda f: f["regime"] == 1),
+    "breadth": ("過半股票在 200 日均線之上", lambda f: f["breadth"] >= 0.5),
+    "peers": ("同產業 10 日內有 2 檔以上也突破", lambda f: f["peers"] >= 2),
+}
+NEEDS = {"tight": "rr", "higher_low": "hl", "vol_surge": "vs", "accum": "ud", "rs70": "rs", "trend": "trend",
+         "regime": "regime", "breadth": "breadth", "peers": "peers"}
+
+
+def _flag(ctx: _Ctx, key: str, src: dict | None = None):
+    f = ctx.pf_ev if src is None else src
+    col = NEEDS[key]
+    if col not in f:
+        return None
+    x = f[col]
+    with np.errstate(invalid="ignore"):
+        return np.where(np.isfinite(x), FLAGS[key][1](f).astype("float32"), np.nan)
+
+
 def patterns(ctx: _Ctx) -> dict:
-    """Fixed price-pattern rules (no fitting): success rate of breakouts with / without each pattern."""
-    r, c = ctx.ev_r, ctx.ev_c
-    rr, vr, hl = ctx.range_ratio[r, c], ctx.vol_ratio[r, c], ctx.higher_low[r, c]
-    tight = np.where(np.isfinite(rr), rr < RANGE_MAX, np.nan)
-    out = {"defs": {"short": PAT_SHORT, "long": PAT_LONG, "range_max": RANGE_MAX}, "modes": {}}
-    ok_all = np.isfinite(tight) & np.isfinite(hl) & np.isfinite(vr)
-    vq = np.nanquantile(vr[ok_all], [0.2, 0.4, 0.6, 0.8]) if ok_all.any() else None
+    """Fixed price / volume / market rules: success rate of breakouts with vs without each rule."""
+    out = {"defs": {k: v[0] for k, v in FLAGS.items()}, "modes": {}}
+    flags = {k: _flag(ctx, k) for k in FLAGS}
+    flags = {k: v for k, v in flags.items() if v is not None}
+    vr = ctx.pf_ev["vr"]
+    okv = np.isfinite(vr)
+    vq = np.nanquantile(vr[okv], [0.2, 0.4, 0.6, 0.8]) if okv.sum() > 100 else None
+    years = sorted(set(ctx.ev_year))
     for mode, (h, q) in MODES.items():
         known, succ, fwd = ctx.outcome(mode)
-        base = known & ok_all
-        if base.sum() < 200:
+        if known.sum() < 200:
             continue
-        t1, h1 = tight == 1, hl == 1
-        m = {"all": _rate(succ, fwd, base),
-             "tight": _rate(succ, fwd, base & t1), "not_tight": _rate(succ, fwd, base & ~t1),
-             "higher_low": _rate(succ, fwd, base & h1), "not_higher_low": _rate(succ, fwd, base & ~h1),
-             "both": _rate(succ, fwd, base & t1 & h1), "tight_only": _rate(succ, fwd, base & t1 & ~h1),
-             "hl_only": _rate(succ, fwd, base & ~t1 & h1), "neither": _rate(succ, fwd, base & ~t1 & ~h1)}
-        # volatility ratio (22-day / 123-day return volatility) by quintile, low = most contracted
-        bins = np.digitize(vr, vq) if vq is not None else None
-        m["vol_quintiles"] = [dict(_rate(succ, fwd, base & (bins == k)),
-                                   upto=round(float(vq[k]), 2) if k < 4 else None) for k in range(5)]
-        # stability: per-year rates for the main groups
-        yrs = []
-        for y in sorted(set(ctx.ev_year)):
-            yb = base & (ctx.ev_year == y)
-            if yb.sum() < 30:
-                continue
-            yrs.append({"year": int(y), "all": _rate(succ, fwd, yb)["rate"], "n": int(yb.sum()),
-                        "tight": _rate(succ, fwd, yb & t1).get("rate"), "higher_low": _rate(succ, fwd, yb & h1).get("rate"),
-                        "both": _rate(succ, fwd, yb & t1 & h1).get("rate"),
-                        "vol_low": _rate(succ, fwd, yb & (bins == 0)).get("rate") if bins is not None else None})
-        m["per_year"] = yrs
-        m["base_q"] = q
+        m = {"all": _rate(succ, fwd, known), "base_q": q, "rules": {}}
+        for k, fl in flags.items():
+            has = known & np.isfinite(fl)
+            yes, no = has & (fl == 1), has & (fl == 0)
+            yr = []
+            for y in years:
+                yb = ctx.ev_year == y
+                a, b = _rate(succ, fwd, yes & yb), _rate(succ, fwd, no & yb)
+                if a.get("n", 0) >= 20 and b.get("n", 0) >= 20:
+                    yr.append({"year": int(y), "yes": a["rate"], "no": b["rate"], "n_yes": a["n"]})
+            wins = sum(1 for x in yr if x["yes"] > x["no"])
+            m["rules"][k] = {"yes": _rate(succ, fwd, yes), "no": _rate(succ, fwd, no),
+                             "share": round(float(yes.sum() / max(has.sum(), 1)), 3),
+                             "years_better": wins, "years": len(yr), "per_year": yr}
+        if "tight" in flags and "higher_low" in flags:
+            t1, h1 = flags["tight"] == 1, flags["higher_low"] == 1
+            m["combo"] = {"both": _rate(succ, fwd, known & t1 & h1), "tight_only": _rate(succ, fwd, known & t1 & ~h1),
+                          "hl_only": _rate(succ, fwd, known & ~t1 & h1), "neither": _rate(succ, fwd, known & ~t1 & ~h1)}
+        if vq is not None:
+            bins = np.digitize(vr, vq)
+            m["vol_quintiles"] = [dict(_rate(succ, fwd, known & okv & (bins == k)),
+                                       upto=round(float(vq[k]), 2) if k < 4 else None) for k in range(5)]
         out["modes"][mode] = m
-        log.info("patterns %s: all=%s tight=%s higher_low=%s both=%s vol_low=%s", mode, m["all"].get("rate"),
-                 m["tight"].get("rate"), m["higher_low"].get("rate"), m["both"].get("rate"), m["vol_quintiles"][0].get("rate"))
+        log.info("patterns %s: all=%s %s", mode, m["all"].get("rate"),
+                 {k: (v["yes"].get("rate"), v["no"].get("rate"), f'{v["years_better"]}/{v["years"]}') for k, v in m["rules"].items()})
     return out
+
+
+# ---------------------------------------------------------------- LightGBM breakout model
+ML_PRICE = ["rr", "vr", "hl", "vs", "ud", "rs", "trend", "d50", "d200", "ret20", "ret60", "regime", "breadth", "peers"]
+ML_PARAMS = dict(n_estimators=300, learning_rate=0.03, num_leaves=15, min_child_samples=100, subsample=0.8,
+                 subsample_freq=1, colsample_bytree=0.7, reg_lambda=5.0, n_jobs=-1, verbose=-1)
+PRICE_LABELS = {"rr": "22／123 日區間比", "vr": "22／123 日波動度比", "hl": "低點墊高", "vs": "突破日量倍數", "ud": "上漲量／下跌量",
+                "rs": "一年相對強度", "trend": "趨勢模板", "d50": "距 50 日線", "d200": "距 200 日線", "ret20": "前 20 日漲幅",
+                "ret60": "前 60 日漲幅", "regime": "大盤多頭", "breadth": "市場廣度", "peers": "同產業突破數"}
+
+
+def _ml_matrix(ctx: _Ctx, L: int, rows=None, cols=None):
+    """Feature matrix: chip window features (observation length L) + price/volume/market features."""
+    if rows is None:
+        keys, Xc = ctx.feats(L)
+        pf = ctx.pf_ev
+        Xp = np.column_stack([pf[k] for k in ML_PRICE if k in pf]) if pf else np.empty((len(Xc), 0))
+    else:
+        keys, Xc = _features(ctx.wins, rows, cols, L)
+        base = ctx.T + 1 - ctx.TAIL
+        Xp = np.column_stack([ctx.pf_tail[k][rows - base, cols] for k in ML_PRICE if k in ctx.pf_tail]) \
+            if ctx.pf_tail else np.empty((len(rows), 0))
+    names = keys + [f"px:{k}" for k in ML_PRICE if k in ctx.pf_ev]
+    return names, np.column_stack([Xc, Xp]).astype("float32")
+
+
+def ml_validate(ctx: _Ctx, mode: str, L: int) -> dict:
+    """Walk-forward by year: train on breakouts whose outcome was known before the test year."""
+    import lightgbm as lgb
+    h, _ = MODES[mode]
+    names, X = _ml_matrix(ctx, L)
+    known, succ, fwd = ctx.outcome(mode)
+    cal = ctx.fs.calendar
+    per_year, scored = [], []
+    n_top = n_all = s_top = s_all = f_top = f_all = 0.0
+    for y in sorted(set(ctx.ev_year)):
+        test = (ctx.ev_year == y) & known
+        y0 = np.searchsorted(cal.values, np.datetime64(f"{y}-01-01"))
+        train = known & (ctx.ev_r + h < y0)
+        if test.sum() < 30 or train.sum() < 1000 or np.nansum(succ[train]) < 100:
+            continue
+        mdl = lgb.LGBMClassifier(**ML_PARAMS).fit(X[train], succ[train].astype(int))
+        te = np.where(test)[0]
+        pr = mdl.predict_proba(X[te])[:, 1]
+        pct = pd.Series(pr + np.random.default_rng(int(y)).random(len(pr)) * 1e-9).rank(pct=True, method="first").values
+        top = pct > 1 - TOP_SHARE
+        st, sa = float(np.mean(succ[te][top])), float(np.mean(succ[te]))
+        ft = float(np.nanmean(np.clip(fwd[te][top], -0.9, 5))) * 100
+        fa = float(np.nanmean(np.clip(fwd[te], -0.9, 5))) * 100
+        per_year.append({"year": int(y), "n": int(len(te)), "top_rate": round(st, 3), "base_rate": round(sa, 3),
+                         "excess": round(ft - fa, 2)})
+        n_top += top.sum(); n_all += len(te); s_top += st * top.sum(); s_all += sa * len(te)
+        f_top += ft * top.sum(); f_all += fa * len(te)
+        scored.append(np.column_stack([np.minimum((pct * 5).astype(int), 4), succ[te]]))
+    if not per_year:
+        return {"n_years": 0}
+    top_rate, base_rate = s_top / max(n_top, 1), s_all / max(n_all, 1)
+    b = np.vstack(scored)
+    quint = [round(float(b[b[:, 0] == k, 1].mean()), 3) if (b[:, 0] == k).any() else None for k in range(5)]
+    lift = top_rate / base_rate if base_rate > 0 else None
+    excess = f_top / max(n_top, 1) - f_all / max(n_all, 1)
+    years_better = sum(1 for p in per_year if p["top_rate"] > p["base_rate"])
+    return {"n_years": len(per_year), "n_events": int(n_all), "top_rate": round(top_rate, 3),
+            "base_rate": round(base_rate, 3), "lift": round(lift, 2) if lift else None, "excess": round(excess, 2),
+            "quintiles": quint, "per_year": per_year, "years_better": years_better,
+            "valid": bool(len(per_year) >= 3 and (lift or 0) >= 1.3 and excess > 0)}
+
+
+def ml_today(ctx: _Ctx, mode: str, L: int, rows: np.ndarray, cols: np.ndarray, quint: list):
+    """Fit on every breakout with a known outcome, score today's candidates."""
+    import lightgbm as lgb
+    names, X = _ml_matrix(ctx, L)
+    known, succ, _ = ctx.outcome(mode)
+    if known.sum() < 1000 or np.nansum(succ[known]) < 100:
+        return None, None
+    mdl = lgb.LGBMClassifier(**ML_PARAMS).fit(X[known], succ[known].astype(int))
+    hist = np.sort(mdl.predict_proba(X[known])[:, 1])
+    imp = mdl.booster_.feature_importance("gain")
+    order = np.argsort(-imp)[:12]
+
+    def nice(n):
+        if n.startswith("px:"):
+            return PRICE_LABELS.get(n[3:], n[3:])
+        return _label(n, ctx.fs)
+    importance = [{"name": nice(names[k]), "gain": round(float(imp[k] / max(imp.sum(), 1e-9)) * 100, 1)} for k in order if imp[k] > 0]
+    if not len(rows):
+        return importance, {}
+    _, Xc = _ml_matrix(ctx, L, rows, cols)
+    pr = mdl.predict_proba(Xc)[:, 1]
+    pct = np.searchsorted(hist, pr) / len(hist)
+    out = {}
+    for j, c in enumerate(cols):
+        k5 = min(int(pct[j] * 5), 4)
+        out[int(c)] = {"p": round(float(pct[j]) * 100, 1), "sr": (quint or [None] * 5)[k5]}
+    return importance, out
 
 
 def compute(fs: FactorSet, scores: dict, store=None) -> dict | None:
     if "score" not in scores:
         return None
-    ctx = _Ctx(fs, scores)
+    ctx = _Ctx(fs, scores, store)
     n_ev = len(ctx.ev_r)
     log.info("breakout: %d fresh 1-year-high breakouts with a full chip window", n_ev)
     if n_ev < 500:
@@ -348,25 +534,41 @@ def compute(fs: FactorSet, scores: dict, store=None) -> dict | None:
                                        "m": [_label(keys[k], fs) + ("偏高" if w[k] > 0 else "偏低")
                                              for k in best if contrib[j, k] > 0]}
         log.info("breakout %s: L=%d lift=%s excess=%s valid=%s", mode, L, v.get("lift"), v.get("excess"), v.get("valid"))
-    # price patterns for today's candidates (breakouts: window ends the day before the breakout)
-    for c in list(today):
-        row = t - today[c]["d"] if today[c]["d"] >= 0 else t + 1
-        if row < T:
-            rr_, vr_, hl_ = ctx.range_ratio[row, c], ctx.vol_ratio[row, c], ctx.higher_low[row, c]
-        else:   # near-highs: window ending today = what a breakout tomorrow would see
-            with np.errstate(all="ignore"):
-                p = ctx.pv[:, c]
-                s22, s123 = p[T - PAT_SHORT:T], p[T - PAT_LONG:T]
-                rr_ = (np.nanmax(s22) - np.nanmin(s22)) / (np.nanmax(s123) - np.nanmin(s123))
-                lr = np.diff(np.log(p[T - PAT_LONG - 1:T]))
-                vr_ = np.nanstd(lr[-PAT_SHORT:], ddof=1) / np.nanstd(lr, ddof=1)
-                hl_ = float(np.nanmin(s22) > np.nanmin(p[T - PAT_LONG:T - PAT_SHORT]))
-        today[c]["rr"] = round(float(rr_), 2) if np.isfinite(rr_) else None
-        today[c]["vr"] = round(float(vr_), 2) if np.isfinite(vr_) else None
-        today[c]["hl"] = bool(hl_ == 1) if np.isfinite(hl_) else None
+    # price / volume features and fixed-rule flags for today's candidates
+    rows_all = np.array([t - today[c]["d"] if today[c]["d"] >= 0 else t + 1 for c in cols], dtype=int)
+    base = T + 1 - ctx.TAIL
+    tail_ok = rows_all >= base
+    for j, c in enumerate(cols):
+        if not tail_ok[j]:
+            continue
+        src = {k: ctx.pf_tail[k][rows_all[j] - base, c:c + 1] for k in ctx.pf_tail}
+        flags = {}
+        for k in FLAGS:
+            fl = _flag(ctx, k, src)
+            if fl is not None and np.isfinite(fl[0]):
+                flags[k] = bool(fl[0] == 1)
+        today[int(c)]["f"] = flags
+        for k in ("rr", "vr", "vs", "rs"):
+            if k in src and np.isfinite(src[k][0]):
+                today[int(c)][k] = round(float(src[k][0]), 2)
     try:
         res["patterns"] = patterns(ctx)
     except Exception:
         log.exception("breakout pattern study failed")
+    # LightGBM breakout model (chips + price/volume + market), walk-forward validated per mode
+    res["ml"] = {}
+    for mode in MODES:
+        try:
+            L = (res["modes"].get(mode) or {}).get("L", LATE)
+            v = ml_validate(ctx, mode, L)
+            ok = tail_ok
+            imp, sc = ml_today(ctx, mode, L, rows_all[ok], cols[ok], v.get("quintiles"))
+            res["ml"][mode] = {"L": L, "validation": v, "valid": v.get("valid", False), "importance": imp or []}
+            for c, x in (sc or {}).items():
+                today[c].setdefault("ml", {})[mode] = x
+            log.info("breakout ML %s: lift=%s excess=%s years_better=%s/%s valid=%s", mode, v.get("lift"),
+                     v.get("excess"), v.get("years_better"), v.get("n_years"), v.get("valid"))
+        except Exception:
+            log.exception("breakout ML %s failed", mode)
     res["today"] = [{"c": str(fs.codes[c]), **today[c]} for c in today]
     return res
