@@ -492,7 +492,59 @@ def update_day(store: Store, d: dt.date, datasets=None, skip_existing=True) -> d
     return res
 
 
+TAIFEX = "https://www.taifex.com.tw/cht/3/"
+
+
+def _taifex_rows(path: str, start: dt.date, end: dt.date, product: str) -> list[list[str]]:
+    r = http_get(TAIFEX + path, params={"queryStartDate": start.strftime("%Y/%m/%d"),
+                                        "queryEndDate": end.strftime("%Y/%m/%d"), "commodityId": product}, retries=3)
+    txt = r.content.decode("cp950", errors="replace")
+    rows = [ln.split(",") for ln in txt.strip().splitlines()[1:] if ln.count(",") >= 10]
+    return rows
+
+
+def fetch_taifex(start: dt.date, end: dt.date) -> pd.DataFrame:
+    """期交所三大法人: foreign net open interest in TAIEX futures (TXF, contracts) and TAIEX options
+    (TXO calls / puts, contracts and NT$ thousand). One row per date, code 'TAIEX'."""
+    out: dict[str, dict] = {}
+    for ln in _taifex_rows("futContractsDateDown", start, end, "TXF"):
+        if len(ln) >= 15 and "外資" in ln[2]:
+            out.setdefault(ln[0], {})["fut_foreign_oi"] = float(ln[13])
+    for ln in _taifex_rows("callsAndPutsDateDown", start, end, "TXO"):
+        if len(ln) >= 16 and "外資" in ln[3]:
+            side = "call" if ("CALL" in ln[2].upper() or "買權" in ln[2]) else "put"
+            out.setdefault(ln[0], {})[f"opt_foreign_{side}_oi"] = float(ln[14])
+            out[ln[0]][f"opt_foreign_{side}_amt"] = float(ln[15])
+    if not out:
+        return pd.DataFrame()
+    df = pd.DataFrame([{"date": pd.Timestamp(k.replace("/", "-")), "code": "TAIEX", **v} for k, v in out.items()])
+    return df.sort_values("date")
+
+
+def update_taifex(store: Store) -> None:
+    """Incremental, one month per request; the first run goes back about 3 years (what TAIFEX serves)."""
+    have = store.dates("taifex")
+    today = dt.date.today()
+    start = (max(have) + dt.timedelta(days=1)) if have else today - dt.timedelta(days=3 * 365)
+    n = 0
+    while start <= today:
+        end = min(today, (start.replace(day=1) + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1))
+        try:
+            df = fetch_taifex(start, end)
+            if not df.empty:
+                store.append("taifex", df)
+                n += len(df)
+        except Exception as e:
+            log.warning("taifex %s..%s: %s", start, end, e)
+        start = end + dt.timedelta(days=1)
+    log.info("taifex: %d new days", n)
+
+
 def update_weekly_monthly(store: Store) -> None:
+    try:
+        update_taifex(store)
+    except Exception as e:
+        log.error("taifex failed: %s", e)
     try:
         today = dt.date.today()
         store.append("exright", fetch_exright(today - dt.timedelta(days=20), today))
@@ -578,6 +630,8 @@ def build_factors(store: Store, since: str = "2012-01-01"):
     f["dealer_hedge_20"] = bps(rsum(dh, 20))
     f["inst_vol_share_20"] = rsum(fo.fillna(0) + tr.fillna(0) + ds.fillna(0), 20) / rsum(vol, 20).where(lambda x: x > 0) * 100
     f["foreign_streak"] = streak(fo)
+    f["foreign_persist_20"] = rsum((fo > 0).astype("float32").where(has_inst), 20) / 20 * 100   # 近20日外資買超天數%
+    f["foreign_accel"] = f["foreign_net_5"] * 4 - f["foreign_net_20"]                        # 近5日買超速度 vs 20日
     f["trust_streak"] = streak(tr)
     f["trust_hold_est"] = rsum(tr, 250, 0.3) / sh * 100          # 投信近一年累積持股(估) %
     fr = W(qfii, "foreign_ratio", 5)
@@ -601,6 +655,9 @@ def build_factors(store: Store, since: str = "2012-01-01"):
     f["sbl_ratio"] = sbl_bal / sh * 100
     f["sbl_chg_20"] = chg(f["sbl_ratio"], 20)
     f["sbl_sell_20"] = rsum(W(sbl, "sbl_sell"), 20) / rsum(vol, 20).where(lambda x: x > 0) * 100
+    adv = (rsum(vol, 20) / 20).where(lambda x: x > 0)
+    f["sbl_dtc"] = sbl_bal / adv                         # 借券賣出餘額 / 日均量 = 回補天數
+    f["short_dtc"] = sb * 1000 / adv                     # 融券餘額 / 日均量
 
     # --- 當沖
     f["daytrade_ratio_20"] = rsum(W(dtr, "daytrade_shares"), 20) / rsum(vol, 20).where(lambda x: x > 0) * 100
@@ -639,6 +696,14 @@ def build_factors(store: Store, since: str = "2012-01-01"):
     f["chip_price_divergence"] = (f["foreign_net_20"].rank(axis=1, pct=True) +
                                   f["trust_net_20"].rank(axis=1, pct=True)) / 2 - f["ret_20"].rank(axis=1, pct=True)
 
+    # 散戶熱度: day trading, margin growth / usage and retail holders rising together (Barber-Lee-Liu-Odean:
+    # Taiwan day traders lose money in aggregate) - used as a contrarian factor
+    heat = [f[k].rank(axis=1, pct=True) for k in ("daytrade_ratio_20", "margin_chg_20", "margin_use", "retail_chg_4w")
+            if k in f]
+    if heat:
+        f["retail_heat"] = sum(h.fillna(0.5) for h in heat) / len(heat) * 100
+        f["retail_heat"] = f["retail_heat"].where(px.notna())
+
     # liquidity: ≥ 200 lots/day (20d avg) and price ≥ 10
     liquid = (rsum(vol, 20) / 20 >= 200_000) & (W(quote, "close", 5).fillna(px) >= 10)
 
@@ -653,6 +718,13 @@ def build_factors(store: Store, since: str = "2012-01-01"):
 
     # market-level series
     ms = {}
+    tx = store.load("taifex", s)
+    if not tx.empty:
+        tx = tx.assign(date=pd.to_datetime(tx["date"])).set_index("date").sort_index()
+        if "fut_foreign_oi" in tx:
+            ms["外資台指期淨未平倉(口)"] = tx["fut_foreign_oi"]
+        if {"opt_foreign_call_amt", "opt_foreign_put_amt"} <= set(tx.columns):
+            ms["外資選擇權淨未平倉(億元)"] = (tx["opt_foreign_call_amt"] - tx["opt_foreign_put_amt"]) / 1e5
     tot_inst = store.load("inst", s)
     if not tot_inst.empty:
         g = tot_inst.groupby("date")
@@ -666,12 +738,13 @@ def build_factors(store: Store, since: str = "2012-01-01"):
 
     spec = {
         "inst": [("foreign_net_20", 1), ("foreign_net_60", 1), ("trust_net_20", 1), ("trust_net_60", 1),
-                 ("foreign_ratio_chg_20", 1), ("foreign_streak", 1), ("trust_streak", 1), ("dealer_net_20", 1)],
+                 ("foreign_ratio_chg_20", 1), ("foreign_streak", 1), ("trust_streak", 1), ("dealer_net_20", 1),
+                 ("foreign_persist_20", 1), ("foreign_accel", 1)],
         "holders": [("big400_chg_4w", 1), ("big400_chg_12w", 1), ("big1000_chg_4w", 1),
                     ("retail_chg_4w", -1), ("holders_chg_4w", -1), ("avg_lots_chg_4w", 1)],
         "margin": [("margin_chg_20", -1), ("margin_ratio", -1), ("margin_use", -1),
-                   ("short_margin_ratio", 1), ("daytrade_ratio_20", -1)],
-        "short": [("sbl_chg_20", -1), ("sbl_ratio", -1), ("sbl_sell_20", -1)],
+                   ("short_margin_ratio", 1), ("daytrade_ratio_20", -1), ("retail_heat", -1), ("short_dtc", 1)],
+        "short": [("sbl_chg_20", -1), ("sbl_ratio", -1), ("sbl_sell_20", -1), ("sbl_dtc", -1)],
         "insider": [("insider_net_chg", 1), ("insider_pledge_ratio", -1)],
     }
     weights = {"inst": 0.35, "holders": 0.25, "margin": 0.15, "short": 0.15, "insider": 0.10}
@@ -781,6 +854,8 @@ LABELS = {
     "holders": "集保股東人數", "big400_chg_1w": "400張大戶週變化(pp)", "big400_chg_4w": "400張大戶4週變化(pp)",
     "big400_chg_12w": "400張大戶12週變化(pp)", "big1000_chg_1w": "1000張大戶週變化(pp)",
     "big1000_chg_4w": "1000張大戶4週變化(pp)", "big1000_chg_12w": "1000張大戶12週變化(pp)",
+    "sbl_dtc": "借券回補天數", "short_dtc": "融券回補天數", "retail_heat": "散戶熱度(0-100)",
+    "foreign_persist_20": "近20日外資買超天數%", "foreign_accel": "外資買超加速度",
     "retail_chg_1w": "散戶週變化(pp)", "retail_chg_4w": "散戶4週變化(pp)", "retail_chg_12w": "散戶12週變化(pp)",
     "holders_chg_4w": "股東人數4週變化%", "avg_lots_chg_4w": "人均持股4週變化%",
     "insider_ratio": "董監持股%", "insider_pledge_ratio": "董監質押比%", "insider_net_chg": "董監持股月變化(股本%)",
@@ -844,4 +919,5 @@ SOURCES = {
     "insider": ("證交所／櫃買中心 OpenAPI 董監持股與質押（公開資訊觀測站）", True),
     "exright": ("證交所 TWT49U 除權除息計算結果", True),
     "tpex_ref": ("櫃買中心每日收盤行情的「次日參考價」（上櫃除權息、減資調整）", True),
+    "taifex": ("期交所 三大法人 台指期／台指選擇權未平倉（大盤環境）", True),
 }

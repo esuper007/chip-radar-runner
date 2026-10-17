@@ -557,7 +557,7 @@ def build_factors(store: Store, since: str = "2014-01-01"):
     spec = {
         "inst": [("inst_own_chg_q", 1), ("inst_holders_chg_q", 1)],
         "insider": [("insider_net_buy_90", 1), ("insider_buyers_90", 1)],
-        "short": [("short_interest_pct", -1), ("short_interest_chg", -1), ("short_vol_ratio_20", -1),
+        "short": [("short_interest_pct", -1), ("short_interest_chg", -1), ("short_interest_dtc", -1), ("short_vol_ratio_20", -1),
                   ("short_vol_ratio_chg", -1), ("ftd_pct_20", -1)],
         "holders": [("activist_13d_90", 1)],
     }

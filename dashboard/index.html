@@ -809,7 +809,7 @@ $("boModes").addEventListener("click", e => { const b = e.target.closest("[data-
   BO.mode = b.dataset.bo; try { localStorage.setItem("boMode", BO.mode); } catch (e) {} renderBreakout(); });
 $("boMore").onclick = () => { BO.shown += 30; renderBreakout(); };
 const BO_RULES = {tight: "波動收斂", higher_low: "低點墊高", vol_surge: "突破放量", accum: "量能累積", rs70: "一年強勢",
-  trend: "趨勢模板", regime: "大盤多頭", breadth: "廣度佳", peers: "同產業齊漲"};
+  trend: "趨勢模板", regime: "大盤多頭", breadth: "廣度佳", peers: "同產業齊漲", fut_long: "外資期貨偏多"};
 // a rule counts as effective when it beat "not met" in at least 65% of tested years, by 5%+ on average,
 // and it actually separates breakouts (met by at most 90% of them)
 function boEffective(rule){

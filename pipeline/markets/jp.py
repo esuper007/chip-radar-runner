@@ -265,6 +265,7 @@ def build_factors(store: Store, since: str = "2014-01-01"):
         f["margin_sell_pct"] = W(mg, "margin_sell_pct", 3)
         f["margin_ratio_jp"] = b / sl.where(sl > 0)                      # 信用倍率
         f["margin_buy_vol"] = b / (rsum(vol, 20) / 20).where(lambda x: x > 0)   # 買残 / 平均出来高 (日数)
+        f["margin_sell_vol"] = sl / (rsum(vol, 20) / 20).where(lambda x: x > 0)  # 賣残 / 平均出来高 = 回補天數
         f["margin_buy_chg_20"] = pct_chg(b, 20)
         f["margin_sell_chg_20"] = pct_chg(sl, 20)
     f.update(price_context(px, vol, None))
@@ -278,7 +279,7 @@ def build_factors(store: Store, since: str = "2014-01-01"):
                 ms[nm] = x / 1e5
     spec = {"short": [("short_pos_pct", -1), ("short_pos_chg_20", -1), ("short_reporters", -1)],
             "margin": [("margin_ratio_jp", -1), ("margin_buy_vol", -1), ("margin_buy_chg_20", -1),
-                       ("margin_sell_chg_20", 1), ("margin_buy_pct", -1)]}
+                       ("margin_sell_chg_20", 1), ("margin_buy_pct", -1), ("margin_sell_vol", -1)]}
     weights = {"short": 0.5, "margin": 0.5}
     series = ["short_pos_pct", "margin_ratio_jp", "margin_buy_vol"]
     return FactorSet(MARKET, cal, codes, f, px, meta, spec, weights, LABELS, series, liquid, ms)
@@ -286,7 +287,7 @@ def build_factors(store: Store, since: str = "2014-01-01"):
 
 LABELS = {"short_pos_pct": "大口空賣餘額報告合計%", "short_pos_chg_20": "大口空賣20日變化(pp)",
           "short_reporters": "空賣申報機構數", "margin_ratio_jp": "信用倍率(買殘/賣殘)",
-          "margin_buy_vol": "融資買殘/日均量(天)", "margin_buy_chg_20": "買殘20日變化%",
+          "margin_buy_vol": "融資買殘/日均量(天)", "margin_sell_vol": "融券賣殘回補天數", "margin_buy_chg_20": "買殘20日變化%",
           "margin_sell_chg_20": "賣殘20日變化%", "margin_buy_pct": "融資買殘佔上市股數%",
           "margin_sell_pct": "融券賣殘佔上市股數%", "ret_20": "20日漲跌%", "ret_60": "60日漲跌%",
           "ret_250": "一年漲跌%", "vol_60": "年化波動%", "dist_52w_high": "距52週高點%"}

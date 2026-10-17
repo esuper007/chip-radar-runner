@@ -177,6 +177,11 @@ class _Ctx:
                 upv = (v1 * (chg > 0)).where(okd).rolling(50, min_periods=40).sum()
                 dnv = (v1 * (chg < 0)).where(okd).rolling(50, min_periods=40).sum()
                 keep("ud", upv / dnv.where(dnv > 0))
+        # TW: foreign net open interest in TAIEX futures, percentile within its past year (known the day before)
+        fut = fs.market_series.get("外資台指期淨未平倉(口)") if getattr(fs, "market_series", None) else None
+        if fut is not None and len(fut.dropna()) > 120:
+            z = fut.reindex(ext).ffill().rolling(250, min_periods=120).rank(pct=True).shift(1)
+            keep("fut", np.repeat(z.values[:, None], pe.shape[1], axis=1))
         # industry heat: other fresh breakouts in the same industry over the last 10 sessions
         ind = None
         try:
@@ -323,9 +328,10 @@ FLAGS = {   # fixed rules (no fitting); name -> (label, function of the feature 
     "regime": ("大盤在 200 日均線之上", lambda f: f["regime"] == 1),
     "breadth": ("過半股票在 200 日均線之上", lambda f: f["breadth"] >= 0.5),
     "peers": ("同產業 10 日內有 2 檔以上也突破", lambda f: f["peers"] >= 2),
+    "fut_long": ("外資台指期淨部位位於一年內較偏多的一半", lambda f: f["fut"] >= 0.5),
 }
 NEEDS = {"tight": "rr", "higher_low": "hl", "vol_surge": "vs", "accum": "ud", "rs70": "rs", "trend": "trend",
-         "regime": "regime", "breadth": "breadth", "peers": "peers"}
+         "regime": "regime", "breadth": "breadth", "peers": "peers", "fut_long": "fut"}
 
 
 def _flag(ctx: _Ctx, key: str, src: dict | None = None):
@@ -380,12 +386,13 @@ def patterns(ctx: _Ctx) -> dict:
 
 
 # ---------------------------------------------------------------- LightGBM breakout model
-ML_PRICE = ["rr", "vr", "hl", "vs", "ud", "rs", "trend", "d50", "d200", "ret20", "ret60", "regime", "breadth", "peers"]
+ML_PRICE = ["rr", "vr", "hl", "vs", "ud", "rs", "trend", "d50", "d200", "ret20", "ret60", "regime", "breadth", "peers", "fut"]
 ML_PARAMS = dict(n_estimators=300, learning_rate=0.03, num_leaves=15, min_child_samples=100, subsample=0.8,
                  subsample_freq=1, colsample_bytree=0.7, reg_lambda=5.0, n_jobs=-1, verbose=-1)
 PRICE_LABELS = {"rr": "22／123 日區間比", "vr": "22／123 日波動度比", "hl": "低點墊高", "vs": "突破日量倍數", "ud": "上漲量／下跌量",
                 "rs": "一年相對強度", "trend": "趨勢模板", "d50": "距 50 日線", "d200": "距 200 日線", "ret20": "前 20 日漲幅",
-                "ret60": "前 60 日漲幅", "regime": "大盤多頭", "breadth": "市場廣度", "peers": "同產業突破數"}
+                "ret60": "前 60 日漲幅", "regime": "大盤多頭", "breadth": "市場廣度", "peers": "同產業突破數",
+                "fut": "外資台指期部位(一年百分位)"}
 
 
 def _ml_matrix(ctx: _Ctx, L: int, rows=None, cols=None):

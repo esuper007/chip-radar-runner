@@ -38,7 +38,7 @@ def feature_panel(fs: FactorSet, scores: dict[str, pd.DataFrame], dates: pd.Date
         cols["mkt_ret_60"] = pd.DataFrame(np.repeat(mk.rank(pct=True).reindex(dates).values[:, None],
                                                     len(fs.codes), axis=1), index=dates, columns=fs.codes)
     for i, (nm, s) in enumerate(sorted(fs.market_series.items())):
-        z = s.rolling(20, min_periods=5).sum() if "買賣超" in nm else s.pct_change(20, fill_method=None)
+        z = s.rolling(20, min_periods=5).sum() if "買賣超" in nm else s if "未平倉" in nm else s.pct_change(20, fill_method=None)
         z = z.reindex(fs.calendar).ffill().rank(pct=True).reindex(dates)
         cols[f"mkt_s{i}"] = pd.DataFrame(np.repeat(z.values[:, None], len(fs.codes), axis=1),
                                                              index=dates, columns=fs.codes)

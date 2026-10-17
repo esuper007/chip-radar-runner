@@ -290,6 +290,7 @@ def build_factors(store: Store, since: str = "2014-01-01"):
         f["margin_chg_20"] = pct_chg(mb, 20)
         f["margin_chg_5"] = pct_chg(mb, 5)
         f["short_qty_chg_20"] = pct_chg(W(mg, "short_qty", 3), 20)
+        f["short_dtc"] = W(mg, "short_qty", 3) / (rsum(vol, 20) / 20).where(lambda x: x > 0)   # 融券余量/日均量
     if not fl.empty:
         a20 = rsum(amount, 20, 0.3).where(lambda x: x > 0)
         f["main_flow_20"] = rsum(W(fl, "flow_main"), 20, 0.3) / a20 * 100
@@ -318,7 +319,7 @@ def build_factors(store: Store, since: str = "2014-01-01"):
     spec = {"inst": [("main_flow_20", 1), ("main_flow_5", 1), ("main_streak", 1), ("lhb_inst_60", 1),
                      ("north_chg_5", 1), ("north_chg_20", 1)],
             "holders": [("holders_chg_q", -1), ("small_flow_20", -1)],
-            "margin": [("margin_chg_20", -1), ("margin_amt_ratio", -1), ("short_qty_chg_20", -1)],
+            "margin": [("margin_chg_20", -1), ("margin_amt_ratio", -1), ("short_qty_chg_20", -1), ("short_dtc", -1)],
             "insider": [("insider_net_chg", 1)]}
     weights = {"inst": 0.4, "holders": 0.25, "margin": 0.2, "insider": 0.15}
     series = ["north_pct", "main_flow_20", "small_flow_20", "margin_amt_ratio", "holders_chg_q"]
@@ -327,7 +328,7 @@ def build_factors(store: Store, since: str = "2014-01-01"):
 
 LABELS = {"north_pct": "陆股通(北向)持股%", "north_chg_5": "北向持股5日变化(pp)", "north_chg_20": "北向持股20日变化(pp)",
           "margin_amt_ratio": "融资余额/日均成交额(天)", "margin_chg_20": "融资余额20日变化%",
-          "margin_chg_5": "融资余额5日变化%", "short_qty_chg_20": "融券余量20日变化%",
+          "margin_chg_5": "融资余额5日变化%", "short_qty_chg_20": "融券余量20日变化%", "short_dtc": "融券回补天数",
           "main_flow_20": "主力20日净流入(成交额%)", "main_flow_5": "主力5日净流入(成交额%)",
           "small_flow_20": "小单(散户)20日净流入(成交额%)", "main_streak": "主力连续流入(+)/流出(-)天数",
           "lhb_inst_60": "龙虎榜机构60日净买(日均额倍数)", "holders_chg_q": "股东户数最近一期变化%",
