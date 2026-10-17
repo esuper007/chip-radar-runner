@@ -41,6 +41,8 @@ NEAR_PCT = 0.03          # "about to break out": within 3% of the 1-year high
 LATE, RECENT = 123, 20
 GRID = [123, 189, 255]
 MODES = {"h126q10": (126, 0.10), "h252q20": (252, 0.20)}
+PAT_SHORT, PAT_LONG = 22, 123      # pattern windows (trading days before the breakout)
+RANGE_MAX = 0.40                    # 波動收斂: 22-day close range < 40% of the 123-day range
 MODE_NAMES = {"h126q10": "突破後半年報酬前 10%", "h252q20": "突破後一年報酬前 20%"}
 TOP_SHARE = 0.2          # validation: the top 20% of breakouts by score
 MAX_EVENTS = 250_000
@@ -112,6 +114,20 @@ class _Ctx:
         self.ev_r, self.ev_c = r, c
         self.ev_year = cal[r].year.values if len(r) else np.array([], int)
         self._feat = {}
+        # price patterns before the breakout (closes only; every window ends the day BEFORE row t)
+        p1 = px.shift(1)
+        with np.errstate(all="ignore"):
+            rng_s = (p1.rolling(PAT_SHORT, min_periods=PAT_SHORT).max() - p1.rolling(PAT_SHORT, min_periods=PAT_SHORT).min()) / p1
+            rng_l = (p1.rolling(PAT_LONG, min_periods=PAT_LONG).max() - p1.rolling(PAT_LONG, min_periods=PAT_LONG).min()) / p1
+            ret1 = np.log(p1 / p1.shift(1))
+            vol_s = ret1.rolling(PAT_SHORT, min_periods=PAT_SHORT - 2).std()
+            vol_l = ret1.rolling(PAT_LONG, min_periods=PAT_LONG - 5).std()
+            self.range_ratio = (rng_s / rng_l).values.astype("float32")
+            self.vol_ratio = (vol_s / vol_l).values.astype("float32")
+            low_recent = p1.rolling(PAT_SHORT, min_periods=PAT_SHORT).min()
+            low_before = px.shift(PAT_SHORT + 1).rolling(PAT_LONG - PAT_SHORT, min_periods=PAT_LONG - PAT_SHORT).min()
+            hl = (low_recent > low_before).values
+            self.higher_low = np.where(np.isfinite(low_recent.values) & np.isfinite(low_before.values), hl, np.nan).astype("float32")
 
     def feats(self, L: int):
         if L not in self._feat:
@@ -222,6 +238,56 @@ def _optimize(ctx: _Ctx, store) -> dict:
     return out
 
 
+def _rate(succ, fwd, m):
+    m = m & np.isfinite(succ)
+    n = int(m.sum())
+    if n == 0:
+        return {"n": 0}
+    return {"n": n, "rate": round(float(np.mean(succ[m])), 3),
+            "ret": round(float(np.nanmean(np.clip(fwd[m], -0.9, 5))) * 100, 2)}
+
+
+def patterns(ctx: _Ctx) -> dict:
+    """Fixed price-pattern rules (no fitting): success rate of breakouts with / without each pattern."""
+    r, c = ctx.ev_r, ctx.ev_c
+    rr, vr, hl = ctx.range_ratio[r, c], ctx.vol_ratio[r, c], ctx.higher_low[r, c]
+    tight = np.where(np.isfinite(rr), rr < RANGE_MAX, np.nan)
+    out = {"defs": {"short": PAT_SHORT, "long": PAT_LONG, "range_max": RANGE_MAX}, "modes": {}}
+    ok_all = np.isfinite(tight) & np.isfinite(hl) & np.isfinite(vr)
+    vq = np.nanquantile(vr[ok_all], [0.2, 0.4, 0.6, 0.8]) if ok_all.any() else None
+    for mode, (h, q) in MODES.items():
+        known, succ, fwd = ctx.outcome(mode)
+        base = known & ok_all
+        if base.sum() < 200:
+            continue
+        t1, h1 = tight == 1, hl == 1
+        m = {"all": _rate(succ, fwd, base),
+             "tight": _rate(succ, fwd, base & t1), "not_tight": _rate(succ, fwd, base & ~t1),
+             "higher_low": _rate(succ, fwd, base & h1), "not_higher_low": _rate(succ, fwd, base & ~h1),
+             "both": _rate(succ, fwd, base & t1 & h1), "tight_only": _rate(succ, fwd, base & t1 & ~h1),
+             "hl_only": _rate(succ, fwd, base & ~t1 & h1), "neither": _rate(succ, fwd, base & ~t1 & ~h1)}
+        # volatility ratio (22-day / 123-day return volatility) by quintile, low = most contracted
+        bins = np.digitize(vr, vq) if vq is not None else None
+        m["vol_quintiles"] = [dict(_rate(succ, fwd, base & (bins == k)),
+                                   upto=round(float(vq[k]), 2) if k < 4 else None) for k in range(5)]
+        # stability: per-year rates for the main groups
+        yrs = []
+        for y in sorted(set(ctx.ev_year)):
+            yb = base & (ctx.ev_year == y)
+            if yb.sum() < 30:
+                continue
+            yrs.append({"year": int(y), "all": _rate(succ, fwd, yb)["rate"], "n": int(yb.sum()),
+                        "tight": _rate(succ, fwd, yb & t1).get("rate"), "higher_low": _rate(succ, fwd, yb & h1).get("rate"),
+                        "both": _rate(succ, fwd, yb & t1 & h1).get("rate"),
+                        "vol_low": _rate(succ, fwd, yb & (bins == 0)).get("rate") if bins is not None else None})
+        m["per_year"] = yrs
+        m["base_q"] = q
+        out["modes"][mode] = m
+        log.info("patterns %s: all=%s tight=%s higher_low=%s both=%s vol_low=%s", mode, m["all"].get("rate"),
+                 m["tight"].get("rate"), m["higher_low"].get("rate"), m["both"].get("rate"), m["vol_quintiles"][0].get("rate"))
+    return out
+
+
 def compute(fs: FactorSet, scores: dict, store=None) -> dict | None:
     if "score" not in scores:
         return None
@@ -282,5 +348,25 @@ def compute(fs: FactorSet, scores: dict, store=None) -> dict | None:
                                        "m": [_label(keys[k], fs) + ("偏高" if w[k] > 0 else "偏低")
                                              for k in best if contrib[j, k] > 0]}
         log.info("breakout %s: L=%d lift=%s excess=%s valid=%s", mode, L, v.get("lift"), v.get("excess"), v.get("valid"))
+    # price patterns for today's candidates (breakouts: window ends the day before the breakout)
+    for c in list(today):
+        row = t - today[c]["d"] if today[c]["d"] >= 0 else t + 1
+        if row < T:
+            rr_, vr_, hl_ = ctx.range_ratio[row, c], ctx.vol_ratio[row, c], ctx.higher_low[row, c]
+        else:   # near-highs: window ending today = what a breakout tomorrow would see
+            with np.errstate(all="ignore"):
+                p = ctx.pv[:, c]
+                s22, s123 = p[T - PAT_SHORT:T], p[T - PAT_LONG:T]
+                rr_ = (np.nanmax(s22) - np.nanmin(s22)) / (np.nanmax(s123) - np.nanmin(s123))
+                lr = np.diff(np.log(p[T - PAT_LONG - 1:T]))
+                vr_ = np.nanstd(lr[-PAT_SHORT:], ddof=1) / np.nanstd(lr, ddof=1)
+                hl_ = float(np.nanmin(s22) > np.nanmin(p[T - PAT_LONG:T - PAT_SHORT]))
+        today[c]["rr"] = round(float(rr_), 2) if np.isfinite(rr_) else None
+        today[c]["vr"] = round(float(vr_), 2) if np.isfinite(vr_) else None
+        today[c]["hl"] = bool(hl_ == 1) if np.isfinite(hl_) else None
+    try:
+        res["patterns"] = patterns(ctx)
+    except Exception:
+        log.exception("breakout pattern study failed")
     res["today"] = [{"c": str(fs.codes[c]), **today[c]} for c in today]
     return res
