@@ -132,7 +132,9 @@ def survivorship(store: Store, fs) -> dict:
                 gone = gone[[bool(re.match(r"^[1-9]\d{3}$", c)) for c in gone.index]]
             missing = int(len(gone))
         out.update({"ref": desc, "ref_complete": complete, "missing": missing})
-        out["status"] = ("fixed" if missing == 0 else "partial" if complete else "not_fixable") if missing is not None else "unknown"
+        # only an official, complete list of delisted stocks can prove nothing is missing; elsewhere prices come
+        # from today's listings, so the gap cannot be closed (the count is an estimate from other filings)
+        out["status"] = ("fixed" if missing == 0 else "partial") if complete else "not_fixable"
     return out
 
 

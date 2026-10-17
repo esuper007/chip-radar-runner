@@ -536,7 +536,8 @@ function survHtml(v){
   const yrs = Object.entries(v.by_year || {}).map(([y, n]) => `${y} 年 ${n}`).join("、");
   return `<div><h2 style="font-size:14px;margin:0 0 6px">存活者偏差檢查 <span class="pill ${st[0]}">${st[1]}</span></h2>
     <p class="hint" style="margin:0">回測已納入 <b>${fmt(v.included,0)}</b> 檔後來下市或停止交易的股票（其中 ${fmt(v.included_liquid,0)} 檔曾經流動性足夠）${yrs ? `，依停止交易年份：${yrs}` : ""}。這些股票在停止交易後以最後成交價計算報酬，不會從回測中消失。
-    ${v.missing != null ? `比對「${esc(v.ref)}」，${v.missing ? `還有約 <b>${fmt(v.missing,0)}</b> 檔曾經存在、但找不到股價的股票沒有納入${v.status === "not_fixable" ? "（這個市場沒有免費的官方下市股價來源，回測結果可能略為偏樂觀，解讀時請保留彈性）" : "（系統每天自動補一批）"}。` : "沒有發現遺漏。"}` : ""}</p></div>`;
+    ${v.status === "not_fixable" ? `這個市場的股價來自目前仍上市的股票清單，沒有免費的官方下市股價來源，已下市的股票大多不在回測中，回測結果可能略為偏樂觀。${v.missing ? `比對「${esc(v.ref)}」，估計約 <b>${fmt(v.missing,0)}</b> 檔曾經存在、但找不到股價。` : `參考資料（${esc(v.ref)}）的歷史太短，無法估計遺漏數量。`}`
+      : v.missing != null ? `比對「${esc(v.ref)}」，${v.missing ? `還有 <b>${fmt(v.missing,0)}</b> 檔下市股票尚未取得股價（系統每天自動補一批）。` : "沒有發現遺漏。"}` : ""}</p></div>`;
 }
 
 // ---------- screener ----------
