@@ -87,7 +87,13 @@ def record(st, fs, fc: pd.DataFrame, sig: dict | None, bo: dict | None, weights:
     if not rows:
         return 0
     df = pd.DataFrame(rows)
-    st.append(DATASET, df, keys=("date", "list", "code"))
+    old = st.load(DATASET)
+    if old is not None and not old.empty and (pd.to_datetime(old["date"]) == t).any():
+        # a rebuild of the same day replaces that day's lists (they may differ, e.g. new blend weights)
+        keep = old[pd.to_datetime(old["date"]) != t]
+        st.rewrite(DATASET, pd.concat([keep, df], ignore_index=True))
+    else:
+        st.append(DATASET, df, keys=("date", "list", "code"))
     log.info("track: recorded %d picks in %d lists for %s", len(df), df["list"].nunique(), t.date())
     return len(df)
 
