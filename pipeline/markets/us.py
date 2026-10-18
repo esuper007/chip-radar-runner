@@ -580,6 +580,12 @@ def build_factors(store: Store, since: str = "2014-01-01"):
     from ..prices import traded_close
     raw_close = traded_close(W(price, "close"), store.load("splits"))
     liquid = (rsum(dollar_vol, 20) / 20 >= 2_000_000) & (raw_close >= 3)
+    try:        # counts only: stock-days that passed the old (split-adjusted) floor but not the as-traded one
+        old_liq = (rsum(dollar_vol, 20) / 20 >= 2_000_000) & (W(price, "close") >= 3)
+        log.info("us liquidity: %d stock-days removed by the as-traded price floor (of %d)",
+                 int((old_liq & ~liquid).values.sum()), int(old_liq.values.sum()))
+    except Exception:
+        pass
     meta = u.reindex(codes)[["name", "mkt"]].assign(industry="")
     ms = {}
     if not sv.empty:
