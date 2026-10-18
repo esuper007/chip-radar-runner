@@ -497,7 +497,7 @@ function renderQuality(s){
   if (Object.keys(MV).length){
     html += `<h2 style="margin-top:14px">模型 vs 籌碼分數：每個期間自動選用較好的一個</h2><table class="mq"><thead><tr><th>期間</th><th>加權綜合（模型）排名 IC</th><th>籌碼分數本身排名 IC</th><th>比較期間</th><th>目前使用</th></tr></thead><tbody>
       ${HZ.filter(([h]) => MV[h]).map(([h, n]) => { const v = MV[h]; return `<tr${v.use_score ? ' class="warnrow"' : ""}><td>${n}</td><td class="num">${fmt(v.ic_model,4)}</td><td class="num">${fmt(v.ic_score,4)}</td><td class="num">${esc(v.period)}（${fmt(v.n_dates,0)} 個日期）</td><td>${v.use_score ? '<span class="pill ng">改用籌碼分數</span>' : '<span class="pill ok">模型</span>'}</td></tr>`; }).join("")}
-      </tbody></table><p class="hint" style="margin-top:6px">在三個模型都有樣本外預測的同一批日期與股票上，比較「加權綜合」和「籌碼分數本身」每天的排序能力（排名 IC 平均）。籌碼分數高出 0.005 以上時，該期間的排行、雙榜與實戰名單改依籌碼分數排序，機率與超額報酬改用「歷史上同一分數級距」的實際結果換算。每週回測時重新判斷。</p>`;
+      </tbody></table><p class="hint" style="margin-top:6px">在模型有樣本外預測的同一批日期與股票上（某個模型缺值時，權重分給其他模型，和畫面上的算法相同），比較「加權綜合」和「籌碼分數本身」每天的排序能力（排名 IC 平均）。籌碼分數高出 0.005 以上時，該期間的排行、雙榜與實戰名單改依籌碼分數排序，機率與超額報酬改用「歷史上同一分數級距」的實際結果換算。每週回測時重新判斷。</p>`;
   }
   html += calibHtml(m);
   if (m.group_ic){
