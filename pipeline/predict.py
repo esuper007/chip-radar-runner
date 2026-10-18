@@ -166,7 +166,10 @@ def _metrics(pred: pd.DataFrame, y: pd.Series) -> dict:
     return res
 
 
-def backtest(X: pd.DataFrame, Y: pd.DataFrame, cal: pd.DatetimeIndex, first_test_year: int | None = None) -> dict:
+def backtest(X: pd.DataFrame, Y: pd.DataFrame, cal: pd.DatetimeIndex, first_test_year: int | None = None,
+             blend_fixed: dict | None = None) -> dict:
+    """blend_fixed: the blend weights in use this quarter (they are re-chosen once per quarter); the
+    model-vs-score check and the rebuilt lists use them, so they judge what the dashboard really shows."""
     """Yearly walk-forward. Train on rows whose label window ends before the test year starts."""
     dates = X.index.get_level_values("date")
     years = sorted(set(dates.year))
@@ -226,8 +229,17 @@ def backtest(X: pd.DataFrame, Y: pd.DataFrame, cal: pd.DatetimeIndex, first_test
         out["blend"] = _blend_weights(bt_preds, Y, calib)
     except Exception:
         log.exception("blend weights failed")
+    blend_used = blend_fixed if (blend_fixed or {}).get("weights") else out.get("blend")
     try:
-        out["_picks"] = _list_picks(bt_preds, calib, out.get("blend"))
+        out["model_vs_score"] = _model_vs_score(bt_preds, Y, X, calib, blend_used)
+    except Exception:
+        log.exception("model vs score check failed")
+    try:
+        out["score_map"] = _score_map(X, Y, first_test_year)
+    except Exception:
+        log.exception("score map failed")
+    try:
+        out["_picks"] = _list_picks(bt_preds, calib, blend_used, X=X, use_score=out.get("model_vs_score"))
     except Exception:
         log.exception("backtest list picks failed")
     # which chip groups actually predicted returns (rank IC of each sub-score)
@@ -355,7 +367,71 @@ def _blend_weights(bt_preds: dict, Y: pd.DataFrame, calib: dict) -> dict | None:
     return out
 
 
-def _list_picks(bt_preds: dict, calib: dict, blend: dict | None, topn: int = 20) -> dict:
+SCORE_MARGIN = 0.005      # the score replaces the models only when its daily rank IC is higher by at least this
+
+
+def _model_vs_score(bt_preds: dict, Y: pd.DataFrame, X: pd.DataFrame, calib: dict, blend: dict | None) -> dict:
+    """Per horizon, on the same out-of-sample rows: the dashboard's blend of the models vs the chip score
+    alone (average daily rank IC with the excess return). When the score is better, that horizon's
+    forecast falls back to the score (`use_score`)."""
+    w = (blend or {}).get("weights") or BLEND_DEFAULT
+    out = {}
+    for hk, P in bt_preds.items():
+        ks = [k for k in ("is", "ml", "an") if k in P and w.get(k, 0) > 0]
+        if not ks or "score" not in X:
+            continue
+        J = pd.concat({k: _cal_p(P, calib, hk, k) for k in ks}, axis=1)
+        tot = sum(w[k] for k in ks)
+        # rows where any model is missing use the weights of the ones present (as on the dashboard)
+        num = sum(J[k].fillna(0) * w[k] for k in ks)
+        den = sum(J[k].notna() * w[k] for k in ks)
+        m = (num / den.where(den > 0)).rename("m")
+        D = pd.concat([m, X["score"].rename("s"), Y[f"y_{hk}"].rename("y")], axis=1, join="inner").dropna()
+        if D.index.get_level_values("date").nunique() < 12:
+            continue
+        icm, ics = _daily_ic(D["m"], D["y"]), _daily_ic(D["s"], D["y"])
+        if icm is None or ics is None:
+            continue
+        dates = D.index.get_level_values("date")
+        out[hk] = {"ic_model": round(icm, 4), "ic_score": round(ics, 4), "n_dates": int(dates.nunique()),
+                   "period": f"{dates.min().date()} ~ {dates.max().date()}", "use_score": bool(ics > icm + SCORE_MARGIN),
+                   "weights": {k: w[k] for k in ks}, "tot": tot}
+        log.info("model vs score %s: model IC %.4f, score IC %.4f -> %s", hk, icm, ics, "score" if out[hk]["use_score"] else "models")
+    return out
+
+
+def _score_map(X: pd.DataFrame, Y: pd.DataFrame, first_test_year: int | None) -> dict:
+    """What history says for each tenth of the chip score: share that beat the market and excess return
+    quantiles. Used to show a forecast when a horizon falls back to the score."""
+    out = {}
+    if "score" not in X:
+        return out
+    for hk in HORIZONS:
+        D = pd.concat([X["score"].rename("s"), Y[f"y_{hk}"].rename("y")], axis=1, join="inner").dropna()
+        if len(D) < 5000:
+            continue
+        edges = np.unique(np.quantile(D["s"], np.linspace(0, 1, 11)))
+        if len(edges) < 4:
+            continue
+        b = np.clip(np.searchsorted(edges, D["s"].values, side="right") - 1, 0, len(edges) - 2)
+        g = D.assign(b=b).groupby("b")["y"]
+        out[hk] = {"edges": [round(float(e), 4) for e in edges],
+                   "p_up": [round(float(v), 4) for v in g.apply(lambda y: (y > 0).mean())],
+                   "q10": [round(float(v), 2) for v in g.quantile(0.1)], "q50": [round(float(v), 2) for v in g.quantile(0.5)],
+                   "q90": [round(float(v), 2) for v in g.quantile(0.9)], "n": int(len(D))}
+    return out
+
+
+def score_forecast(score_today: pd.Series, smap: dict) -> pd.DataFrame:
+    """Forecast columns from the chip score (0-100) and a score map of one horizon."""
+    e = np.array(smap["edges"])
+    s = score_today.dropna() / 100
+    b = np.clip(np.searchsorted(e, s.values, side="right") - 1, 0, len(e) - 2)
+    return pd.DataFrame({k: np.array(smap[k])[b] for k in ("p_up", "q10", "q50", "q90")}, index=s.index)
+
+
+def _list_picks(bt_preds: dict, calib: dict, blend: dict | None, topn: int = 20, X: pd.DataFrame | None = None,
+                use_score: dict | None = None) -> dict:
     """The daily lists of the live track record, rebuilt on the backtest (weekly, out of sample), so the live
     results can be compared with what history says to expect. Uses the in/out-of-sample model and LightGBM
     (the analog model only scores a sample of stocks in the backtest), renormalized to their blend weights."""
@@ -370,6 +446,10 @@ def _list_picks(bt_preds: dict, calib: dict, blend: dict | None, topn: int = 20)
                           "qi": P["is"]["q50"], "qm": P["ml"]["q50"]}).dropna()
         J["p"] = J["pi"] * wi + J["pm"] * wm
         J["q"] = J["qi"] * wi + J["qm"] * wm
+        if (use_score or {}).get(hk, {}).get("use_score") and X is not None and "score" in X:
+            # this horizon falls back to the chip score: both lists follow the score's order
+            J["p"] = J["q"] = X["score"].reindex(J.index)
+            J = J.dropna(subset=["p"])
         for name, col, direction in lists:
             rows = []
             for d, g in J.groupby(level="date"):

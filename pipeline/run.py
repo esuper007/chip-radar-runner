@@ -74,7 +74,8 @@ def cmd_prices(a):
     from . import prices
     m, st = mod(a.market), Store(a.market)
     st.pull()
-    prices.update(st, m.symbols(st), years_back=a.years, last_day=last_complete_day(a.market, m.TZ))
+    prices.update(st, m.symbols(st), years_back=a.years, last_day=last_complete_day(a.market, m.TZ),
+                  track_splits=getattr(m, "TRACK_SPLITS", False))
     if hasattr(m, "delisted_prices"):            # survivorship bias: add stocks that no longer trade
         try:
             m.delisted_prices(st)
@@ -98,10 +99,12 @@ def cmd_build(a):
     scores = compute_scores(fs)
     from . import health
     hres = None
+    contrib = {}
     try:
         # factor health + composite from industry/size-neutral ranks with quarterly IC weights (no look-ahead)
         hres = health.compute(fs, st, scores["score"])
         scores["score"] = health.weighted_score(fs, hres, scores["score"])
+        contrib = health.contributions(fs, hres)
     except Exception:
         log.exception("factor health failed; keeping the equal-weight score")
 
@@ -118,12 +121,13 @@ def cmd_build(a):
     expect = st.load_meta("track_expect") or {}
     if a.backtest:
         old_blend = metrics.get("blend")
-        X, Y = predict.training_frame(fs, scores)
-        metrics = predict.backtest(X, Y, fs.calendar)
-        del X, Y
         # blend weights are re-chosen once per quarter (kept fixed in between)
-        if old_blend and old_blend.get("quarter") == str(pd.Timestamp.today().to_period("Q")) and old_blend.get("weights") \
-                and old_blend.get("label") == predict.LABEL:
+        keep = bool(old_blend and old_blend.get("quarter") == str(pd.Timestamp.today().to_period("Q")) and old_blend.get("weights")
+                    and old_blend.get("label") == predict.LABEL)
+        X, Y = predict.training_frame(fs, scores)
+        metrics = predict.backtest(X, Y, fs.calendar, blend_fixed=old_blend if keep else None)
+        del X, Y
+        if keep:
             metrics["blend"] = old_blend
         picks = metrics.pop("_picks", None) or {}
         picks.update(track.shadow_picks(fs))
@@ -154,6 +158,14 @@ def cmd_build(a):
         log.info("using models trained %s", bundle["info"]["trained_at"])
     # a calibration fitted for another prediction target must not be applied
     fc, info = predict.forecast(fs, scores, bundle, calib=metrics.get("calib") if metrics.get("label") == predict.LABEL else None)
+    # horizons where the chip score beat the models out of sample show the score's forecast instead
+    for hk, v in (metrics.get("model_vs_score") or {}).items():
+        smap = (metrics.get("score_map") or {}).get(hk)
+        if v.get("use_score") and smap and metrics.get("label") == predict.LABEL:
+            sf = predict.score_forecast(scores["score"].iloc[-1], smap)
+            for stat in sf.columns:
+                fc[f"sc_{hk}_{stat}"] = sf[stat].reindex(fc.index)
+            log.info("forecast %s: using the chip score (it beat the models out of sample)", hk)
     if info.get("is_oos"):
         for hk, m_ in info["is_oos"].items():
             metrics.setdefault(hk, {})["is"] = m_
@@ -199,6 +211,7 @@ def cmd_build(a):
         track.record(st, fs, fc, sig, bo, bw)
         trk = track.evaluate(st, fs, {k: v.get("name") for k, v in ((sig or {}).get("stats") or {}).items()}, expect)
         trk["weights"] = bw or track.W_PCT
+        trk["gain_new"] = track.new_entries(st, "gain_1q")
         try:
             from . import portfolio
             trk["conc"] = portfolio.today(fs, st.load(track.DATASET), size)
@@ -212,8 +225,9 @@ def cmd_build(a):
         wts = hres["weights"].dropna(how="all")
         hsum = {"factors": hres["factors"], "neutralized_by": hres["neutralized_by"],
                 "weights_from": str(wts.index.min().date()) if len(wts) else None,
-                **{k: hres.get(k) for k in ("clusters", "corr", "composite", "sbl_split", "regime_share", "fdr_q", "min_weeks", "method")}}
-    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg, bo, trk, hsum)
+                **{k: hres.get(k) for k in ("clusters", "corr", "composite", "sbl_split", "regime_share", "fdr_q", "min_weeks", "method", "decay")}}
+    res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg, bo, trk, hsum,
+                       contrib=contrib)
     log.info("build done: %s", res)
 
 

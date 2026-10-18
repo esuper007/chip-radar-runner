@@ -79,6 +79,8 @@ def shadow_picks(fs, step: int = 5) -> dict:
 
 
 def _blend(fc: pd.DataFrame, hk: str, stat: str, weights: dict | None = None) -> pd.Series:
+    if f"sc_{hk}_{stat}" in fc.columns:          # this horizon falls back to the chip score
+        return fc[f"sc_{hk}_{stat}"].dropna()
     num = den = 0
     for m, w in (weights or W).items():
         w = w / 100 if weights else w
@@ -278,3 +280,17 @@ def evaluate(st, fs, sig_names: dict | None = None, expect: dict | None = None) 
         out["lists"][name] = res
     log.info("track: %d lists since %s", len(out["lists"]), out["since"])
     return out
+
+
+def new_entries(st, name: str = "gain_1q") -> list[str]:
+    """Codes in the last recorded day's list that were not in the previous recorded day's list."""
+    picks = st.load(DATASET)
+    if picks is None or picks.empty:
+        return []
+    g = picks[picks["list"] == name]
+    days = sorted(pd.to_datetime(g["date"]).unique())
+    if len(days) < 2:
+        return []
+    cur = g[pd.to_datetime(g["date"]) == days[-1]]["code"].astype(str)
+    prev = set(g[pd.to_datetime(g["date"]) == days[-2]]["code"].astype(str))
+    return [c for c in cur if c not in prev]

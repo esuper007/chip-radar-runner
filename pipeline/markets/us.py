@@ -481,6 +481,9 @@ def backfill_day(store: Store, d: dt.date) -> dict:
     return res
 
 
+TRACK_SPLITS = True       # keep stock splits: the liquidity price floor needs the as-traded price
+
+
 def symbols(store: Store) -> dict[str, str]:
     uni = store.load("universe")
     if uni.empty:
@@ -572,7 +575,11 @@ def build_factors(store: Store, since: str = "2014-01-01"):
         f["inst_holders_chg_q"] = W(q, "n_mgr_chg", lag).shift(32)
     f.update(price_context(px, vol, shares))
 
-    liquid = (rsum(dollar_vol, 20) / 20 >= 2_000_000) & (W(price, "close") >= 3)
+    # the $3 floor uses the price the stock really traded at that day (Yahoo closes are split-adjusted,
+    # so a stock that later did reverse splits would otherwise look expensive in the past)
+    from ..prices import traded_close
+    raw_close = traded_close(W(price, "close"), store.load("splits"))
+    liquid = (rsum(dollar_vol, 20) / 20 >= 2_000_000) & (raw_close >= 3)
     meta = u.reindex(codes)[["name", "mkt"]].assign(industry="")
     ms = {}
     if not sv.empty:

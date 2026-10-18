@@ -37,6 +37,8 @@ SAMPLE_EVERY = 5
 LOOKBACK_DAYS = 756          # 3 years of trading days for the weights
 MIN_HISTORY = 252
 MIN_WEEKS_FOR_WEIGHT = 104   # a factor needs ~2 years of known weekly outcomes before it gets weight
+DECAY_RECENT = 26          # weeks of recent known outcomes checked for decay (~6 months)
+DECAY_LONG = 156           # compared with the previous ~3 years
 CLUSTER_CORR = 0.5           # factors correlated at least this much share one weight
 
 
@@ -430,7 +432,28 @@ def compute(fs: FactorSet, store=None, base_score: pd.DataFrame | None = None) -
     log.info("health: %d factors (%d pass FDR), neutralized by %s%s; %d clusters; weights active from %s", len(names),
              sum(1 for n in names if factors[n]["fdr_ok"]), "industry" if ind is not None else "-",
              "+size" if size_rk is not None else "", len(latest_clusters or []), W.dropna(how="all").index.min())
-    return {"factors": factors, "signs": neutral, "weights": Wf, "raw_days": raw_days, "method": now, "ind": ind, "size_rk": size_rk,
+    # decay watch: a factor that has weight now, whose last ~6 months of known 20-day IC is at or below zero
+    # and clearly below its own previous 3 years (20-day outcomes of consecutive weeks overlap, so the
+    # standard error of the recent mean counts about one independent observation per 4 weeks)
+    decay = []
+    for n in names:
+        v = ic20[n]
+        v = v[np.isfinite(v)]
+        if len(v) < DECAY_RECENT + 52:
+            continue
+        rec, lng = v[-DECAY_RECENT:], v[-(DECAY_RECENT + DECAY_LONG):-DECAY_RECENT]
+        mr, ml, sd = float(np.mean(rec)), float(np.mean(lng)), float(np.std(lng, ddof=1))
+        se = sd * np.sqrt(4 / DECAY_RECENT) if sd > 0 else None
+        z = (mr - ml) / se if se else None
+        w_now = float(Wf[n].iloc[-1]) if n in Wf.columns and np.isfinite(Wf[n].iloc[-1]) else 0.0
+        dec = bool(w_now > 0 and mr <= 0 and z is not None and z <= -2)
+        factors[n]["recent"] = {"ic": round(mr, 4), "long": round(ml, 4), "z": round(z, 2) if z is not None else None,
+                                "weeks": DECAY_RECENT, "decay": dec}
+        if dec:
+            decay.append(n)
+    if decay:
+        log.info("health: %d weighted factors show decay", len(decay))
+    return {"decay": decay, "factors": factors, "signs": neutral, "weights": Wf, "raw_days": raw_days, "method": now, "ind": ind, "size_rk": size_rk,
             "neutralized_by": [x for x, ok in (("industry", ind is not None), ("size", size_rk is not None)) if ok],
             "clusters": latest_clusters or [], "corr": corr_out, "composite": comp, "sbl_split": split,
             "regime_share": regime_share, "fdr_q": FDR_Q, "min_weeks": MIN_WEEKS_FOR_WEIGHT}
@@ -461,3 +484,38 @@ def weighted_score(fs: FactorSet, h: dict, base_score: pd.DataFrame) -> pd.DataF
     has_w = W.notna().any(axis=1).values[:, None]
     out = np.where(has_w & np.isfinite(s.values), s.values, base_score.values)
     return pd.DataFrame(out, index=fs.calendar, columns=fs.codes).astype("float32")
+
+
+def contributions(fs: FactorSet, h: dict, top: int = 6) -> dict:
+    """Why a stock has its score on the last day: for each weighted factor, its weight times how far the
+    stock's (neutralized) rank is from the middle, as points of the composite before the final re-rank.
+    Returns {code: [[factor, points, rank 0-100], ...]} with the `top` largest by size."""
+    W = h["weights"]
+    i = len(fs.calendar) - 1
+    if not W.iloc[i].notna().any():
+        return {}
+    live = alive(fs).iloc[[i]]
+    raw_day = h.get("raw_days") is not None and bool(h["raw_days"][i])
+    cols, vals, wts = [], [], []
+    for n, sign in h["signs"].items():
+        w = W[n].iloc[i]
+        if not (np.isfinite(w) and w > 0):
+            continue
+        rk = (fs.factors[n].iloc[[i]] * sign).where(live).rank(axis=1, pct=True)
+        v = rk.values[0] if raw_day else neutralize(rk, h["ind"], None if h["size_rk"] is None else h["size_rk"][[i]]).values[0]
+        cols.append(n); vals.append(v); wts.append(w)
+    if not cols:
+        return {}
+    V = np.array(vals).T                      # codes x factors
+    Wt = np.array(wts)[None, :]
+    ok = np.isfinite(V)
+    den = np.where(ok, Wt, 0).sum(axis=1, keepdims=True)
+    with np.errstate(all="ignore"):
+        P = np.where(ok, (V - 0.5) * Wt / den * 100, np.nan)
+    out = {}
+    for j, c in enumerate(fs.codes):
+        row = P[j]
+        k = [x for x in np.argsort(-np.nan_to_num(np.abs(row), nan=-1))[:top] if np.isfinite(row[x])]
+        if k:
+            out[c] = [[cols[x], round(float(row[x]), 1), round(float(V[j, x]) * 100)] for x in k]
+    return out

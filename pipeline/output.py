@@ -73,7 +73,7 @@ def _model_labels(fs: FactorSet) -> dict:
 def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics: dict,
           freshness: dict, key_factors: list[str], quality: dict | None = None, sig: dict | None = None,
           surge: dict | None = None, breakout: dict | None = None,
-          track: dict | None = None, health: dict | None = None) -> dict:
+          track: dict | None = None, health: dict | None = None, contrib: dict | None = None) -> dict:
     out_dir = DIST / fs.market
     t = fs.calendar[-1]
     sc = {k: v.loc[t] for k, v in scores.items()}
@@ -96,6 +96,8 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
         row["sub"] = {k[2:]: _r(v.get(c), 1) for k, v in sc.items() if k.startswith("s_")}
         row["f"] = {k: _r(v.get(c), 3) for k, v in F.items()}
         row["sig"] = flags.get(c, [])
+        if contrib and c in contrib:
+            row["ct"] = contrib[c]                # [[factor, points, rank 0-100], ...] largest first
         if sig and c in sig.get("recent", {}):
             row["bs"] = sig["recent"][c]          # bottom-up signals: {key: trading days ago}
         if surge and c in surge.get("today", {}):
@@ -159,13 +161,13 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
         "track": track or {},
         "health": health or {},
     }
-    summary["alerts"] = _alerts(fs, rows, sig, breakout, track, quality)
+    summary["alerts"] = _alerts(fs, rows, sig, breakout, track, quality, health)
     _dump(out_dir / "summary.js", summary)
     return {"rows": len(rows), "asof": str(t.date())}
 
 
 def _alerts(fs: FactorSet, rows: list, sig: dict | None, bo: dict | None, track: dict | None,
-            quality: dict | None = None) -> dict:
+            quality: dict | None = None, health: dict | None = None) -> dict:
     """What a daily notification should mention (the notifier adds the viewer's watchlist):
     live lists below their backtest range, stocks whose validated signal fired on the last day, and fresh
     breakouts in the top fifth of a breakout model that passed validation. `data` lists the data checks that
@@ -189,6 +191,10 @@ def _alerts(fs: FactorSet, rows: list, sig: dict | None, bo: dict | None, track:
             if x.get("d") == 0 and p is not None and p >= 80 and x["c"] in names:
                 out["breakouts"].append({"c": x["c"], "n": names[x["c"]], "mode": mode, "p": p,
                                          "sr": ((x.get("ml") or {}).get(mode) or {}).get("sr")})
+    F = (health or {}).get("factors") or {}
+    out["decay"] = [{"name": F.get(n, {}).get("label", n), "ic": (F.get(n, {}).get("recent") or {}).get("ic"),
+                     "long": (F.get(n, {}).get("recent") or {}).get("long")} for n in ((health or {}).get("decay") or [])]
+    out["gain_new"] = [{"c": c, "n": names[c]} for c in ((track or {}).get("gain_new") or []) if c in names]
     out["data"] = [{"name": c["name"], "detail": c.get("detail", "")} for c in (quality or {}).get("checks", [])
                    if not c.get("ok")]
     tp = (quality or {}).get("tdcc_progress")
