@@ -5,8 +5,8 @@ week's list is bought (no transaction costs). The market is the equal-weighted a
 over the same days. Reported per list:
   - relative value curve (portfolio / market), annualized excess return, max drawdown of the relative curve
   - weekly win rate (share of weeks that beat the market) and turnover (share of names replaced each week)
-  - excess return per calendar year, and the annualized excess with the best 5% of weeks removed
-    (if that is near zero, the result came from a few strong stretches)
+  - excess return per calendar year, and the annualized excess with the best and the worst 5% of weeks
+    removed (if that is near zero, the result came from a few strong stretches, not from typical weeks)
   - neutral checks: excess versus the stock's own industry, own volatility fifth and own size fifth, so
     a list that only leans on one industry, on volatile stocks or on small caps shows it
   - concentration: average share of the largest industry, average volatility and size percentile
@@ -164,13 +164,13 @@ def simulate(fs: FactorSet, picks: dict, size: pd.DataFrame | None = None, ctx: 
         n_years = len(df) / per_year
         ann = lambda x: float((1 + x).prod() ** (1 / n_years) - 1) if n_years > 0 else None
         dd = float((rel / rel.cummax() - 1).min())
-        best = exc.quantile(0.95)
+        best, worst = exc.quantile(0.95), exc.quantile(0.05)
         res = {"from": str(df["d"].min().date()), "to": str(df["d"].max().date()), "weeks": int(len(df)),
                "ann_excess": round(ann(exc) * 100, 2), "ann_port": round(ann(df["port"]) * 100, 2),
                "ann_mkt": round(ann(df["mkt"]) * 100, 2), "max_dd": round(dd * 100, 2),
                "win": round(float((exc > 0).mean()), 3),
                "turnover": round(float(np.mean(turn)), 3) if turn else None,
-               "ann_ex_best5": round(ann(exc[exc < best]) * 100, 2)}
+               "ann_trim5": round(ann(exc[(exc < best) & (exc > worst)]) * 100, 2)}
         yr = pd.DataFrame({"y": df["d"].dt.year, "x": exc}).groupby("y")["x"]
         res["years"] = [{"y": int(y), "x": round(float((1 + g).prod() - 1) * 100, 2), "w": int(len(g))}
                         for y, g in yr]

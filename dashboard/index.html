@@ -298,7 +298,7 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <div id="pfYears" class="scroll"></div>
     <div class="scroll" id="pfTable"></div>
     <div class="scroll" id="pfConc"></div>
-    <p class="hint">把排行名單套在歷史樣本外資料上：每週取當週名單的 20 檔，下一個交易日收盤等金額買進，持有到下週名單出爐後再換股，不計交易成本。<b>相對大盤淨值</b>是組合除以同期全市場（流動性足夠的股票）等權平均，往上代表跑贏。<b>最大回落</b>是相對淨值從高點往下最多掉多少。<b>去掉最好 5% 的週</b>：如果拿掉少數幾週後超額就消失，代表成績靠少數行情撐起來。<b>扣產業／波動／規模後</b>：每檔股票改和同產業、同波動五分位、同成交值五分位的平均比較；若扣完明顯變小，代表名單主要是在押某個產業、高波動股或小型股，而不是籌碼本身。「1季落後大盤機率前 20」和回測平均落後大盤的影子名單是應落後的名單，數字越負越好。</p>
+    <p class="hint">把排行名單套在歷史樣本外資料上：每週取當週名單的 20 檔，下一個交易日收盤等金額買進，持有到下週名單出爐後再換股，不計交易成本。<b>相對大盤淨值</b>是組合除以同期全市場（流動性足夠的股票）等權平均，往上代表跑贏。<b>最大回落</b>是相對淨值從高點往下最多掉多少。<b>去掉最好與最差各 5% 的週</b>：只看「一般的週」；如果拿掉頭尾少數幾週後超額就消失，代表成績靠少數行情撐起來，而不是穩定累積。<b>扣產業／波動／規模後</b>：每檔股票改和同產業、同波動五分位、同成交值五分位的平均比較；若扣完明顯變小，代表名單主要是在押某個產業、高波動股或小型股，而不是籌碼本身。「1季落後大盤機率前 20」和回測平均落後大盤的影子名單是應落後的名單，數字越負越好。</p>
   </section>
 
   <section class="panel" aria-label="籌碼因子體檢">
@@ -966,16 +966,16 @@ function renderPortfolio(){
     const x = P[PF.list], down = isDown(PF.list);
     const sg = v => v == null ? "—" : (v > 0 ? "+" : "") + fmt(v,2) + "%";
     const good = v => v == null ? "" : (down ? -v : v) > 0 ? "up" : "down";
-    $("pfStatus").innerHTML = `<b>${esc(name(PF.list))}</b>：${esc(x.from)} ～ ${esc(x.to)}，共 ${fmt(x.weeks,0)} 週。年化報酬 ${sg(x.ann_port)}，同期大盤 ${sg(x.ann_mkt)}，年化超額 <b class="${good(x.ann_excess)}">${sg(x.ann_excess)}</b>；去掉最好 5% 的週後 ${sg(x.ann_ex_best5)}。`;
+    $("pfStatus").innerHTML = `<b>${esc(name(PF.list))}</b>：${esc(x.from)} ～ ${esc(x.to)}，共 ${fmt(x.weeks,0)} 週。年化報酬 ${sg(x.ann_port)}，同期大盤 ${sg(x.ann_mkt)}，年化超額 <b class="${good(x.ann_excess)}">${sg(x.ann_excess)}</b>；去掉最好與最差各 5% 的週後 ${sg(x.ann_trim5)}。`;
     const v = x.curve.v.map(y => (y - 1) * 100);
     $("pfChart").innerHTML = `<h2 style="font-size:14px;margin:4px 0">相對大盤淨值（%，0 = 和大盤打平）</h2>${spark(x.curve.d, v, 640, 150)}`;
     $("pfYears").innerHTML = `<table class="mq"><thead><tr><th>年份</th>${x.years.map(y => `<th class="num">${y.y}${y.w < 40 ? `<span class="muted">（${y.w} 週）</span>` : ""}</th>`).join("")}</tr></thead><tbody>
       <tr><td>當年超額</td>${x.years.map(y => `<td class="num ${good(y.x)}">${sg(y.x)}</td>`).join("")}</tr></tbody></table>`;
     const N = {ind: "產業", vol: "波動", size: "規模"};
-    $("pfTable").innerHTML = `<h2 style="font-size:14px;margin:12px 0 4px">各名單比較</h2><table class="mq"><thead><tr><th>名單</th><th>週數</th><th>年化超額</th><th>去掉最好 5% 的週</th><th>最大回落</th><th>每週勝率</th><th>每週換股比例</th>
+    $("pfTable").innerHTML = `<h2 style="font-size:14px;margin:12px 0 4px">各名單比較</h2><table class="mq"><thead><tr><th>名單</th><th>週數</th><th>年化超額</th><th>去掉最好最差各 5% 週</th><th>最大回落</th><th>每週勝率</th><th>每週換股比例</th>
       ${Object.keys(N).map(k => `<th>扣${N[k]}後</th>`).join("")}<th>最大產業佔比</th><th>波動百分位</th><th>規模百分位</th></tr></thead><tbody>
       ${keys.map(k => { const y = P[k], dn = isDown(k), gd = v => v == null ? "" : (dn ? -v : v) > 0 ? "up" : "down";
-        return `<tr${k === PF.list ? ' class="best"' : ""}><td>${esc(name(k))}</td><td class="num">${fmt(y.weeks,0)}</td><td class="num ${gd(y.ann_excess)}"><b>${sg(y.ann_excess)}</b></td><td class="num ${gd(y.ann_ex_best5)}">${sg(y.ann_ex_best5)}</td>
+        return `<tr${k === PF.list ? ' class="best"' : ""}><td>${esc(name(k))}</td><td class="num">${fmt(y.weeks,0)}</td><td class="num ${gd(y.ann_excess)}"><b>${sg(y.ann_excess)}</b></td><td class="num ${gd(y.ann_trim5)}">${sg(y.ann_trim5)}</td>
         <td class="num">${sg(y.max_dd)}</td><td class="num">${pct(y.win)}</td><td class="num">${y.turnover == null ? "—" : pct(y.turnover)}</td>
         ${Object.keys(N).map(n => `<td class="num ${gd(y.neutral?.[n])}">${y.neutral?.[n] == null ? '<span class="muted">無資料</span>' : sg(y.neutral[n])}</td>`).join("")}
         <td class="num">${y.conc?.top_ind_share == null ? "—" : pct(y.conc.top_ind_share)}</td><td class="num">${y.conc?.vol_pct == null ? "—" : fmt(y.conc.vol_pct,0)}</td><td class="num">${y.conc?.size_pct == null ? "—" : fmt(y.conc.size_pct,0)}</td></tr>`; }).join("")}
