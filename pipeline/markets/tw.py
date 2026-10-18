@@ -323,7 +323,9 @@ def _tdcc_parse(html: str, code: str, date: str) -> pd.DataFrame:
     for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.I | re.S):
         cells = [re.sub(r"<[^>]+>|&nbsp;|,|\s", "", c) for c in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.I | re.S)]
         if len(cells) >= 5 and cells[0].isdigit() and 1 <= int(cells[0]) <= 17:
-            rows.append(dict(date=date, code=code, level=int(cells[0]), holders=num(cells[2]),
+            # the query page numbers 差異數調整 / 合計 differently from the open-data file: go by the label
+            lv = 17 if "合計" in cells[1] else 16 if "差異" in cells[1] else int(cells[0])
+            rows.append(dict(date=date, code=code, level=lv, holders=num(cells[2]),
                              shares=num(cells[3]), pct=num(cells[4])))
     return pd.DataFrame(rows)
 
@@ -395,6 +397,16 @@ def backfill_tdcc(store: Store, minutes: float = TDCC_MINUTES) -> int:
         break
     got += _tdcc_flush(store, buf)
     store.save_meta("tdcc_tried", sorted(tried))
+    # re-check every week touched, on the complete data now stored (the last record per date wins)
+    t = store.load("tdcc")
+    if not t.empty:
+        t = t.copy()
+        t["date"] = pd.to_datetime(t["date"])
+        tot = t["retail_pct"] + t["mid_pct"] + t["big400_pct"]
+        for dd, g in t.assign(off=(tot - 100).abs() > 0.5).groupby("date"):
+            if dd.strftime("%Y%m%d") in dates:
+                record_check("tdcc_pct_sum", dd.strftime("%Y%m%d"), int(g["off"].sum()) <= len(g) * 0.01,
+                             f"集保各級距持股比例加總 ≈ 100%（偏離 {int(g['off'].sum())} 檔）", 0, int(g["off"].sum()))
     log.info("tdcc history: %d requests, %d stock-weeks added, %.0f min", n_req, got, (time.time() - t0) / 60)
     return got
 
