@@ -290,6 +290,17 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <p class="hint">系統每天收盤後把當天的排行榜、起漲訊號、突破名單存檔，之後依實際股價計算 20、63、126 個交易日後的報酬。「超額」是和同期全市場（流動性足夠的股票）等權平均相比；「勝率」是超額報酬為正的比例。這是上線後的真實紀錄，不是回測，也不計交易成本。名單要經過對應天數才會有結果。<b>95% 區間</b>：同一個持有期間內每天的名單會重疊，所以獨立樣本數以「名單天數 ÷ 持有天數」計算，滿 2 期才顯示區間。<b>回測預期</b>：把同樣的名單規則套在歷史樣本外資料上，算出「和目前紀錄一樣長的期間」平均超額報酬的 10%～90% 範圍；實戰低於下限且已累積 10 天以上，就標示「低於預期」，代表訊號可能正在失效（「應落後」的名單相反：沒有如預期落後才示警）。<b>影子名單</b>：因子體檢中發現、但方向和原本假設相反的指標（例如台股融資券、借券），只在這裡追蹤，不放進任何分數；實戰也成立再考慮正式採用。所有報酬都從名單產生後的下一個交易日收盤起算。</p>
   </section>
 
+  <section class="panel" aria-label="組合回測">
+    <div class="sec-head"><h2>組合回測：照名單每週換股，結果會怎樣</h2>
+      <nav class="tabs" role="tablist" aria-label="名單" id="pfTabs"></nav></div>
+    <p class="hint" id="pfStatus" style="margin:0 0 10px"></p>
+    <div id="pfChart" class="scroll"></div>
+    <div id="pfYears" class="scroll"></div>
+    <div class="scroll" id="pfTable"></div>
+    <div class="scroll" id="pfConc"></div>
+    <p class="hint">把排行名單套在歷史樣本外資料上：每週取當週名單的 20 檔，下一個交易日收盤等金額買進，持有到下週名單出爐後再換股，不計交易成本。<b>相對大盤淨值</b>是組合除以同期全市場（流動性足夠的股票）等權平均，往上代表跑贏。<b>最大回落</b>是相對淨值從高點往下最多掉多少。<b>去掉最好 5% 的週</b>：如果拿掉少數幾週後超額就消失，代表成績靠少數行情撐起來。<b>扣產業／波動／規模後</b>：每檔股票改和同產業、同波動五分位、同成交值五分位的平均比較；若扣完明顯變小，代表名單主要是在押某個產業、高波動股或小型股，而不是籌碼本身。「1季落後大盤機率前 20」和回測平均落後大盤的影子名單是應落後的名單，數字越負越好。</p>
+  </section>
+
   <section class="panel" aria-label="籌碼因子體檢">
     <div class="sec-head"><h2>籌碼因子體檢：每個指標實際上有沒有預測力</h2></div>
     <p class="hint" id="hlStatus" style="margin:0 0 10px"></p>
@@ -401,7 +412,7 @@ async function loadMarket(){
     renderSummary();
     if (!S.screen[m]) S.screen[m] = await getJSON(dataUrl("screen"));
     if (m !== S.market) return;
-    buildFilters(); renderRows(); renderRank(); renderSignals(); renderBreakout(); renderTrack(); renderHealth(); renderWatch();
+    buildFilters(); renderRows(); renderRank(); renderSignals(); renderBreakout(); renderTrack(); renderPortfolio(); renderHealth(); renderWatch();
   }catch(e){
     if (m !== S.market) return;
     if (!(e && e.status)) console.error("render failed", e);
@@ -528,7 +539,13 @@ function renderDQ(s){
   const li = checks.map(c => `<li><span class="pill ${c.ok?"ok":"ng"}">${c.ok?"通過":"注意"}</span><span>${esc(c.name)}<small>${esc(c.detail||"")}</small></span></li>`).join("");
   const src = (q.sources||[]).map(x => `<li><span class="pill ${x.official?"off":"third"}">${x.official?"官方":"第三方"}</span><span>${esc(DS[x.dataset]||x.dataset)}<small>${esc(x.source)}</small></span></li>`).join("");
   el.innerHTML = `<div><p class="hint" style="margin:0 0 8px">${q.n_fail ? `${q.n_fail} 項需要注意，其餘 ${q.n - q.n_fail} 項通過。` : `全部 ${q.n} 項檢查通過。`}檢查包含：官方市場合計與個股加總是否一致、不同來源互相比對、每日筆數與缺漏日期。</p><ul>${li}</ul></div>
-    <div><p class="hint" style="margin:0 0 8px">有官方來源時一律優先採用；標示「第三方」的資料為業者整理，解讀時請保留彈性。</p><ul>${src}</ul></div>${survHtml(q.survivorship)}`;
+    <div><p class="hint" style="margin:0 0 8px">有官方來源時一律優先採用；標示「第三方」的資料為業者整理，解讀時請保留彈性。</p><ul>${src}</ul></div>${survHtml(q.survivorship)}${tdccHtml(q.tdcc_progress)}`;
+}
+function tdccHtml(t){
+  if (!t || t.done_pct == null) return "";
+  const stalled = t.left && !t.added;
+  return `<div><h2 style="font-size:14px;margin:0 0 6px">集保歷史回補進度 <span class="pill ${t.left ? (stalled ? "ng" : "third") : "ok"}">${t.left ? (stalled ? "停滯" : "補資料中") : "已完成"}</span></h2>
+    <p class="hint" style="margin:0">集保中心查詢頁可回溯約一年的每週股權分散資料，系統每天補一批（成交量大的股票、最近的週優先）。目前完成 <b>${fmt(t.done_pct,1)}%</b>，還剩約 ${fmt(t.left,0)} 筆（股票 × 週）${t.date ? `；最近一次（${esc(t.date)}）新增 ${fmt(t.added || 0,0)} 筆` : ""}。${stalled ? "最近一次沒有補到任何資料，可能是查詢頁暫時無法連線，會在下次更新時重試。" : ""}</p></div>`;
 }
 const SURV_ST = {fixed: ["ok", "已修正"], partial: ["ng", "補資料中"], not_fixable: ["ng", "無法完全修正"], unknown: ["third", "無法判斷"]};
 function survHtml(v){
@@ -923,6 +940,53 @@ function renderTrack(){
     ${["20","63","126"].map(h => `<th colspan="4">${h} 日後：報酬／超額（95% 區間）／勝率／回測預期</th>`).join("")}</tr></thead><tbody>
     ${keys.map(k => { const v = lists[k]; return `<tr${v.warn ? ' class="warnrow"' : ""}><td>${esc(v.name)}${v.shadow ? ' <span class="pill third" title="只追蹤、不影響任何分數或名單">影子</span>' : ""}</td><td class="num">${fmt(v.days,0)}</td><td class="num">${fmt(v.picks,0)}</td>${["20","63","126"].map(h => cell(v.h?.[h], v)).join("")}</tr>`; }).join("")}
     </tbody></table>`;
+}
+
+
+// ---------- portfolio backtest ----------
+const PF = {list: null};
+try { PF.list = localStorage.getItem("pfList"); } catch (e) {}
+$("pfTabs").addEventListener("click", e => { const b = e.target.closest("[data-pf]"); if (!b) return;
+  PF.list = b.dataset.pf; try { localStorage.setItem("pfList", PF.list); } catch (e) {} renderPortfolio(); });
+const PF_NAMES = () => ({...(S.summary[S.market]?.track?.lists ? Object.fromEntries(Object.entries(S.summary[S.market].track.lists).map(([k, v]) => [k, v.name])) : {}),
+  up_1q: "1季跑贏大盤機率前 20", up_1y: "1年跑贏大盤機率前 20", down_1q: "1季落後大盤機率前 20（應落後）", gain_1q: "1季預估超額報酬前 20"});
+function renderPortfolio(){
+  const s = S.summary[S.market] || {}, P = s.metrics?.portfolio || {}, conc = s.track?.conc || {};
+  const order = ["up_1q", "gain_1q", "up_1y", "down_1q"];
+  const rank = k => order.indexOf(k) >= 0 ? order.indexOf(k) : 99;
+  const keys = Object.keys(P).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const nm = PF_NAMES(), name = k => (nm[k] || k).replace(/（回測平均.*?）/, "");
+  if (!keys.length){
+    $("pfTabs").innerHTML = ""; ["pfChart","pfYears","pfTable"].forEach(id => $(id).innerHTML = "");
+    $("pfStatus").textContent = "這個市場的組合回測會在下一次每週模型重算後產生。";
+  } else {
+    if (!P[PF.list]) PF.list = keys[0];
+    $("pfTabs").innerHTML = keys.map(k => `<button role="tab" data-pf="${esc(k)}" aria-selected="${k === PF.list}">${esc(name(k).replace(/前 20.*$/, "").replace("機率", ""))}</button>`).join("");
+    const isDown = k => k === "down_1q" || s.track?.lists?.[k]?.dir < 0;
+    const x = P[PF.list], down = isDown(PF.list);
+    const sg = v => v == null ? "—" : (v > 0 ? "+" : "") + fmt(v,2) + "%";
+    const good = v => v == null ? "" : (down ? -v : v) > 0 ? "up" : "down";
+    $("pfStatus").innerHTML = `<b>${esc(name(PF.list))}</b>：${esc(x.from)} ～ ${esc(x.to)}，共 ${fmt(x.weeks,0)} 週。年化報酬 ${sg(x.ann_port)}，同期大盤 ${sg(x.ann_mkt)}，年化超額 <b class="${good(x.ann_excess)}">${sg(x.ann_excess)}</b>；去掉最好 5% 的週後 ${sg(x.ann_ex_best5)}。`;
+    const v = x.curve.v.map(y => (y - 1) * 100);
+    $("pfChart").innerHTML = `<h2 style="font-size:14px;margin:4px 0">相對大盤淨值（%，0 = 和大盤打平）</h2>${spark(x.curve.d, v, 640, 150)}`;
+    $("pfYears").innerHTML = `<table class="mq"><thead><tr><th>年份</th>${x.years.map(y => `<th class="num">${y.y}${y.w < 40 ? `<span class="muted">（${y.w} 週）</span>` : ""}</th>`).join("")}</tr></thead><tbody>
+      <tr><td>當年超額</td>${x.years.map(y => `<td class="num ${good(y.x)}">${sg(y.x)}</td>`).join("")}</tr></tbody></table>`;
+    const N = {ind: "產業", vol: "波動", size: "規模"};
+    $("pfTable").innerHTML = `<h2 style="font-size:14px;margin:12px 0 4px">各名單比較</h2><table class="mq"><thead><tr><th>名單</th><th>週數</th><th>年化超額</th><th>去掉最好 5% 的週</th><th>最大回落</th><th>每週勝率</th><th>每週換股比例</th>
+      ${Object.keys(N).map(k => `<th>扣${N[k]}後</th>`).join("")}<th>最大產業佔比</th><th>波動百分位</th><th>規模百分位</th></tr></thead><tbody>
+      ${keys.map(k => { const y = P[k], dn = isDown(k), gd = v => v == null ? "" : (dn ? -v : v) > 0 ? "up" : "down";
+        return `<tr${k === PF.list ? ' class="best"' : ""}><td>${esc(name(k))}</td><td class="num">${fmt(y.weeks,0)}</td><td class="num ${gd(y.ann_excess)}"><b>${sg(y.ann_excess)}</b></td><td class="num ${gd(y.ann_ex_best5)}">${sg(y.ann_ex_best5)}</td>
+        <td class="num">${sg(y.max_dd)}</td><td class="num">${pct(y.win)}</td><td class="num">${y.turnover == null ? "—" : pct(y.turnover)}</td>
+        ${Object.keys(N).map(n => `<td class="num ${gd(y.neutral?.[n])}">${y.neutral?.[n] == null ? '<span class="muted">無資料</span>' : sg(y.neutral[n])}</td>`).join("")}
+        <td class="num">${y.conc?.top_ind_share == null ? "—" : pct(y.conc.top_ind_share)}</td><td class="num">${y.conc?.vol_pct == null ? "—" : fmt(y.conc.vol_pct,0)}</td><td class="num">${y.conc?.size_pct == null ? "—" : fmt(y.conc.size_pct,0)}</td></tr>`; }).join("")}
+      </tbody></table><p class="hint" style="margin-top:6px">百分位是名單平均落在全市場的位置（50 = 中間）：波動百分位 80 代表名單偏向高波動股，規模百分位 30 代表偏向成交值小的股票。最大產業佔比是每週名單裡最多的那個產業所佔的比例（平均）。</p>`;
+  }
+  const ck = Object.keys(conc).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  $("pfConc").innerHTML = ck.length ? `<h2 style="font-size:14px;margin:12px 0 4px">今天的名單集中在哪裡（${esc(s.asof || "")}）</h2><table class="mq"><thead><tr><th>名單</th><th>最多的產業</th><th>波動百分位</th><th>規模百分位</th></tr></thead><tbody>
+    ${ck.map(k => { const c = conc[k]; const hi = c.top_ind_share >= 0.5;
+      return `<tr><td>${esc(name(k))}</td><td>${c.top_ind ? c.top_ind.map(t => `${esc(t.i)} ${t.n}`).join("、") + (hi ? ' <span class="pill ng">集中</span>' : "") : '<span class="muted">此市場沒有產業分類</span>'}</td>
+      <td class="num">${c.vol_pct == null ? "—" : fmt(c.vol_pct,0)}${c.vol_pct >= 75 ? ' <span class="pill third">偏高波動</span>' : ""}</td><td class="num">${c.size_pct == null ? "—" : fmt(c.size_pct,0)}${c.size_pct != null && c.size_pct <= 30 ? ' <span class="pill third">偏小型</span>' : ""}</td></tr>`; }).join("")}
+    </tbody></table><p class="hint" style="margin-top:6px">同一產業佔名單一半以上標示「集中」；波動百分位 75 以上標示「偏高波動」，規模百分位 30 以下標示「偏小型」。</p>` : "";
 }
 
 // ---------- breakout to a 1-year high ----------

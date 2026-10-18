@@ -397,6 +397,16 @@ def backfill_tdcc(store: Store, minutes: float = TDCC_MINUTES) -> int:
         break
     got += _tdcc_flush(store, buf)
     store.save_meta("tdcc_tried", sorted(tried))
+    try:        # progress of the history fill (counts only), shown on the dashboard and in the daily alert
+        have = store.load("tdcc")
+        done = set(zip(pd.to_datetime(have["date"]).dt.strftime("%Y%m%d"), have["code"].astype(str))) if not have.empty else set()
+        total = len(dates) * len(codes)
+        left = sum(1 for d in dates for c in codes if (d, c) not in done and (d, c) not in tried)
+        store.save_meta("tdcc_progress", {"date": str(dt.date.today()), "added": int(got), "requests": int(n_req),
+                                          "left": int(left), "total": int(total),
+                                          "done_pct": round(100 * (1 - left / total), 1) if total else None})
+    except Exception as e:
+        log.warning("tdcc history: progress not saved (%s)", type(e).__name__)
     # re-check every week touched, on the complete data now stored (the last record per date wins)
     t = store.load("tdcc")
     if not t.empty:

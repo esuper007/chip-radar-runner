@@ -159,15 +159,18 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
         "track": track or {},
         "health": health or {},
     }
-    summary["alerts"] = _alerts(fs, rows, sig, breakout, track)
+    summary["alerts"] = _alerts(fs, rows, sig, breakout, track, quality)
     _dump(out_dir / "summary.js", summary)
     return {"rows": len(rows), "asof": str(t.date())}
 
 
-def _alerts(fs: FactorSet, rows: list, sig: dict | None, bo: dict | None, track: dict | None) -> dict:
+def _alerts(fs: FactorSet, rows: list, sig: dict | None, bo: dict | None, track: dict | None,
+            quality: dict | None = None) -> dict:
     """What a daily notification should mention (the notifier adds the viewer's watchlist):
     live lists below their backtest range, stocks whose validated signal fired on the last day, and fresh
-    breakouts in the top fifth of a breakout model that passed validation."""
+    breakouts in the top fifth of a breakout model that passed validation. `data` lists the data checks that
+    currently fail (the notifier reports only those that are new since its last message, and the ones that
+    recovered); `tdcc` is the progress of the TDCC history fill, with `stalled` when the last run added nothing."""
     names = {r["c"]: r["n"] for r in rows}
     out = {"asof": str(fs.calendar[-1].date()), "track_warn": [], "signals": [], "breakouts": []}
     for k, v in ((track or {}).get("lists") or {}).items():
@@ -186,4 +189,10 @@ def _alerts(fs: FactorSet, rows: list, sig: dict | None, bo: dict | None, track:
             if x.get("d") == 0 and p is not None and p >= 80 and x["c"] in names:
                 out["breakouts"].append({"c": x["c"], "n": names[x["c"]], "mode": mode, "p": p,
                                          "sr": ((x.get("ml") or {}).get(mode) or {}).get("sr")})
+    out["data"] = [{"name": c["name"], "detail": c.get("detail", "")} for c in (quality or {}).get("checks", [])
+                   if not c.get("ok")]
+    tp = (quality or {}).get("tdcc_progress")
+    if tp:
+        out["tdcc"] = {"done_pct": tp.get("done_pct"), "left": tp.get("left"), "date": tp.get("date"),
+                       "stalled": bool(tp.get("left") and not tp.get("added"))}
     return out

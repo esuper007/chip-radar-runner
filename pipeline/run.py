@@ -105,6 +105,12 @@ def cmd_build(a):
     except Exception:
         log.exception("factor health failed; keeping the equal-weight score")
 
+    size = None
+    try:
+        size = health._size(fs, st)          # log 60-day traded value, for the portfolio size checks
+    except Exception:
+        log.exception("size proxy failed")
+
     out_dir = Path("dist") / a.market
     metrics_path = out_dir / "metrics.json"
     metrics = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
@@ -123,6 +129,11 @@ def cmd_build(a):
         picks.update(track.shadow_picks(fs))
         for name, pk in picks.items():
             expect[name] = {"step": "week", **track.expect_series(fs, pk)}
+        try:
+            from . import portfolio
+            metrics["portfolio"] = portfolio.simulate(fs, picks, size)
+        except Exception:
+            log.exception("portfolio backtest failed")
         try:
             st.save_meta("track_expect", {k: v for k, v in expect.items() if not k.startswith(("bo", "sig:"))})
         except Exception as e:
@@ -154,6 +165,8 @@ def cmd_build(a):
     from . import quality
     daily_sets = [d for d in getattr(m, "FRESHNESS_DATASETS", ["price"])]
     qrep = quality.report(st, fs, daily_sets, getattr(m, "SOURCES", {}))
+    if a.market == "tw":
+        qrep["tdcc_progress"] = st.load_meta("tdcc_progress")
     log.info("data quality: %d of %d checks need attention", qrep["n_fail"], qrep["n"])
     from . import signals
     ev = None
@@ -186,6 +199,11 @@ def cmd_build(a):
         track.record(st, fs, fc, sig, bo, bw)
         trk = track.evaluate(st, fs, {k: v.get("name") for k, v in ((sig or {}).get("stats") or {}).items()}, expect)
         trk["weights"] = bw or track.W_PCT
+        try:
+            from . import portfolio
+            trk["conc"] = portfolio.today(fs, st.load(track.DATASET), size)
+        except Exception:
+            log.exception("list concentration failed")
         st.push()                      # keep the day's picks even if publishing fails later
     except Exception:
         log.exception("track record failed")
