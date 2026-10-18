@@ -948,6 +948,7 @@ const PF = {list: null};
 try { PF.list = localStorage.getItem("pfList"); } catch (e) {}
 $("pfTabs").addEventListener("click", e => { const b = e.target.closest("[data-pf]"); if (!b) return;
   PF.list = b.dataset.pf; try { localStorage.setItem("pfList", PF.list); } catch (e) {} renderPortfolio(); });
+const PF_SHORT = {up_1q: "1季跑贏機率", gain_1q: "1季預估超額", up_1y: "1年跑贏機率", down_1q: "1季落後機率"};
 const PF_NAMES = () => ({...(S.summary[S.market]?.track?.lists ? Object.fromEntries(Object.entries(S.summary[S.market].track.lists).map(([k, v]) => [k, v.name])) : {}),
   up_1q: "1季跑贏大盤機率前 20", up_1y: "1年跑贏大盤機率前 20", down_1q: "1季落後大盤機率前 20（應落後）", gain_1q: "1季預估超額報酬前 20"});
 function renderPortfolio(){
@@ -961,7 +962,7 @@ function renderPortfolio(){
     $("pfStatus").textContent = "這個市場的組合回測會在下一次每週模型重算後產生。";
   } else {
     if (!P[PF.list]) PF.list = keys[0];
-    $("pfTabs").innerHTML = keys.map(k => `<button role="tab" data-pf="${esc(k)}" aria-selected="${k === PF.list}">${esc(name(k).replace(/前 20.*$/, "").replace("機率", ""))}</button>`).join("");
+    $("pfTabs").innerHTML = keys.map(k => `<button role="tab" data-pf="${esc(k)}" aria-selected="${k === PF.list}">${esc(PF_SHORT[k] || name(k).replace(/前 20.*$/, "").replace("影子：", "影子・").replace("最高", "").trim())}</button>`).join("");
     const isDown = k => k === "down_1q" || s.track?.lists?.[k]?.dir < 0;
     const x = P[PF.list], down = isDown(PF.list);
     const sg = v => v == null ? "—" : (v > 0 ? "+" : "") + fmt(v,2) + "%";
