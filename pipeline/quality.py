@@ -25,7 +25,8 @@ DATASET_NAMES = {
 
 
 # Event-type data: the number of rows per day varies naturally, so "thin days" are not errors.
-EVENT_DATASETS = {"lhb", "ggcg", "gdhs", "activist", "exright", "ftd", "inst13f", "insider13"}
+EVENT_DATASETS = {"lhb", "ggcg", "gdhs", "activist", "exright", "ftd", "inst13f", "insider13",
+                  "tdcc"}     # tdcc: past weeks are being filled a few stocks at a time, so row counts vary
 # Data published with a known delay (calendar days); judged by staleness instead of missing days.
 EXPECTED_LAG = {"ftd": 35, "inst13f": 150, "si": 20, "tdcc": 10, "shortpos": 16, "short_pos": 10,
                 "gdhs": 100, "invtype": 14, "insider": 45, "mtall": 4, "margin_cn": 3}

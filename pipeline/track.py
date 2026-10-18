@@ -38,11 +38,13 @@ LIST_NAMES = {"up_1q": "1季跑贏大盤機率前 20", "up_1y": "1年跑贏大�
 # Shadow lists: hypotheses found in the factor check that are NOT used by the score. They are only recorded
 # here, so the live record can confirm (or not) a direction that was noticed after looking at history.
 # name -> (factor, expected direction of the top-20 by factor value: +1 beat the market, -1 lag it, label)
+# The expected direction of a shadow list comes from its own backtest (the sign of its average 63-day excess
+# return); the factor check ranks the whole market, and the 20 most extreme stocks need not behave the same way.
 SHADOW = {
-    "tw": {"short_dtc": (-1, "影子：融券回補天數最高 20（預期落後）"),
-           "short_margin_ratio": (-1, "影子：券資比最高 20（預期落後）"),
-           "sbl_dtc": (1, "影子：借券回補天數最高 20（預期領先）"),
-           "sbl_sell_20": (1, "影子：借券賣出佔成交量最高 20（預期領先）")},
+    "tw": {"short_dtc": (-1, "影子：融券回補天數最高 20"),
+           "short_margin_ratio": (-1, "影子：券資比最高 20"),
+           "sbl_dtc": (1, "影子：借券回補天數最高 20"),
+           "sbl_sell_20": (1, "影子：借券賣出佔成交量最高 20")},
 }
 DOWN = {"down_1q"}       # lists expected to lag the market (a warning means they did NOT lag)
 
@@ -224,6 +226,12 @@ def evaluate(st, fs, sig_names: dict | None = None, expect: dict | None = None) 
         nm = LIST_NAMES.get(name) or (f"起漲訊號：{(sig_names or {}).get(name[4:], name[4:])}" if name.startswith("sig:") else
                                       SHADOW.get(fs.market, {}).get(name[7:], (1, name))[1] if name.startswith("shadow:") else name)
         dirn = list_dir(name, fs.market)
+        ex0 = (expect or {}).get(name) or {}
+        if name.startswith("shadow:"):
+            e = ex0.get("63") or ex0.get("20")
+            if e and len(e.get("v", [])) >= 10:
+                dirn = -1 if np.mean(e["v"]) < 0 else 1
+            nm += "（回測平均" + ("落後" if dirn < 0 else "領先") + "大盤）"
         res = {"name": nm, "picks": int(len(g)), "days": int(g["date"].nunique()), "h": {}, "dir": dirn,
                "shadow": name.startswith("shadow:")}
         ex = (expect or {}).get(name) or {}
