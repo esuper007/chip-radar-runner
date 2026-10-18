@@ -9,7 +9,8 @@ Lists recorded each day (liquid stocks only):
   bo              fresh 1-year-high breakouts that day (score = LightGBM half-year rank when available)
   bo_top          the best fifth of that day's breakouts by the LightGBM half-year model
 
-Results (no transaction costs): return after 20 / 63 / 126 trading days, and excess return versus the
+Results (no transaction costs): bought at the close of the next trading day (the lists are made after the
+close), return after 20 / 63 / 126 trading days, and excess return versus the
 equal-weighted average of all liquid stocks over the same days. "hit" = share of picks that beat it.
 
 Early warning: the same lists are rebuilt on the backtest (out of sample) and the live average excess
@@ -23,15 +24,56 @@ import numpy as np
 import pandas as pd
 
 from .common import log
-from .factors import exit_price
+from .factors import ENTRY_LAG, exit_price
 
 DATASET = "picks"
 TOPN = 20
 HORIZONS = (20, 63, 126)
 W = {"is": 0.70, "ml": 0.15, "an": 0.15}          # default; the backtest's quarterly blend weights replace it
 W_PCT = {k: int(v * 100) for k, v in W.items()}
-LIST_NAMES = {"up_1q": "1季上漲機率前 20", "up_1y": "1年上漲機率前 20", "down_1q": "1季下跌機率前 20（應落後）",
-              "gain_1q": "1季預估漲幅前 20", "bo": "當日突破一年高點（全部）", "bo_top": "當日突破・模型前 20%"}
+LIST_NAMES = {"up_1q": "1季跑贏大盤機率前 20", "up_1y": "1年跑贏大盤機率前 20", "down_1q": "1季落後大盤機率前 20（應落後）",
+              "gain_1q": "1季預估超額報酬前 20", "bo": "當日突破一年高點（全部）", "bo_top": "當日突破・模型前 20%"}
+
+
+# Shadow lists: hypotheses found in the factor check that are NOT used by the score. They are only recorded
+# here, so the live record can confirm (or not) a direction that was noticed after looking at history.
+# name -> (factor, expected direction of the top-20 by factor value: +1 beat the market, -1 lag it, label)
+SHADOW = {
+    "tw": {"short_dtc": (-1, "影子：融券回補天數最高 20（預期落後）"),
+           "short_margin_ratio": (-1, "影子：券資比最高 20（預期落後）"),
+           "sbl_dtc": (1, "影子：借券回補天數最高 20（預期領先）"),
+           "sbl_sell_20": (1, "影子：借券賣出佔成交量最高 20（預期領先）")},
+}
+DOWN = {"down_1q"}       # lists expected to lag the market (a warning means they did NOT lag)
+
+
+def list_dir(name: str, market: str) -> int:
+    if name in DOWN:
+        return -1
+    if name.startswith("shadow:"):
+        return SHADOW.get(market, {}).get(name[7:], (1, ""))[0]
+    return 1
+
+
+def shadow_picks(fs, step: int = 5) -> dict:
+    """Weekly history of the shadow lists (top 20 liquid stocks by factor) for their expected ranges."""
+    out = {}
+    liq = fs.liquid.fillna(False) if fs.liquid is not None else None
+    for f, (_, _) in SHADOW.get(fs.market, {}).items():
+        x = fs.factors.get(f)
+        if x is None:
+            continue
+        rows = []
+        for d in fs.calendar[::step]:
+            v = x.loc[d]
+            if liq is not None:
+                v = v[liq.loc[d]]
+            v = v.dropna()
+            if len(v) >= TOPN * 3:
+                rows.append(pd.DataFrame({"date": d, "code": v.sort_values(ascending=False).head(TOPN).index}))
+        if rows:
+            out[f"shadow:{f}"] = pd.concat(rows, ignore_index=True)
+    return out
 
 
 def _blend(fc: pd.DataFrame, hk: str, stat: str, weights: dict | None = None) -> pd.Series:
@@ -84,6 +126,12 @@ def record(st, fs, fc: pd.DataFrame, sig: dict | None, bo: dict | None, weights:
         scored = [x for x in today if sc(x) is not None]
         if scored:
             add("bo_top", [(x["c"], sc(x)) for x in scored if sc(x) >= 80])
+    for f in SHADOW.get(fs.market, {}):
+        x = fs.factors.get(f)
+        if x is not None:
+            v = x.loc[t].reindex(sorted(ok)).dropna()
+            if len(v) >= TOPN * 3:
+                add(f"shadow:{f}", v.sort_values(ascending=False).head(TOPN).items())
     if not rows:
         return 0
     df = pd.DataFrame(rows)
@@ -113,15 +161,16 @@ def expect_series(fs, picks: pd.DataFrame, horizons=HORIZONS) -> dict:
     i, j = p["i"].astype(int).values, p["j"].astype(int).values
     out = {}
     for h in horizons:
-        ok = i + h < T
+        L = ENTRY_LAG
+        ok = i + h + L < T
         if not ok.any():
             continue
         ii, jj = i[ok], j[ok]
         with np.errstate(all="ignore"):
-            r = np.clip(ev[ii + h, jj] / pv[ii, jj] - 1, -0.9, 5)
+            r = np.clip(ev[ii + L + h, jj] / pv[ii + L, jj] - 1, -0.9, 5)
             mk = {}
             for d in np.unique(ii):
-                rr = ev[d + h] / pv[d] - 1
+                rr = ev[d + L + h] / pv[d + L] - 1
                 rr = rr[lv[d] & np.isfinite(rr)]
                 mk[d] = float(np.mean(np.clip(rr, -0.9, 5))) if len(rr) else np.nan
         e = pd.Series(r - np.array([mk[d] for d in ii]), index=ii).dropna()
@@ -161,28 +210,32 @@ def evaluate(st, fs, sig_names: dict | None = None, expect: dict | None = None) 
     lv = liq.values
     out = {"since": str(picks["date"].min().date()), "days": int(picks["date"].nunique()), "lists": {}}
     mkt_cache = {}
+    L = ENTRY_LAG      # picks are bought at the close of the next trading day
 
     def mkt(i, h):
         if (i, h) not in mkt_cache:
             with np.errstate(all="ignore"):
-                r = ev[i + h] / pv[i] - 1
+                r = ev[i + L + h] / pv[i + L] - 1
             r = r[lv[i] & np.isfinite(r)]
             mkt_cache[(i, h)] = float(np.mean(np.clip(r, -0.9, 5))) if len(r) else np.nan
         return mkt_cache[(i, h)]
 
     for name, g in picks.groupby("list"):
-        res = {"name": LIST_NAMES.get(name) or (f"起漲訊號：{(sig_names or {}).get(name[4:], name[4:])}" if name.startswith("sig:") else name),
-               "picks": int(len(g)), "days": int(g["date"].nunique()), "h": {}}
+        nm = LIST_NAMES.get(name) or (f"起漲訊號：{(sig_names or {}).get(name[4:], name[4:])}" if name.startswith("sig:") else
+                                      SHADOW.get(fs.market, {}).get(name[7:], (1, name))[1] if name.startswith("shadow:") else name)
+        dirn = list_dir(name, fs.market)
+        res = {"name": nm, "picks": int(len(g)), "days": int(g["date"].nunique()), "h": {}, "dir": dirn,
+               "shadow": name.startswith("shadow:")}
         ex = (expect or {}).get(name) or {}
         warn = None
         for h in HORIZONS:
             ret, exc, dd = [], [], []
             for d, c in zip(g["date"], g["code"]):
                 i, j = pos.get(d), col.get(c)
-                if i is None or j is None or i + h >= T:
+                if i is None or j is None or i + h + L >= T:
                     continue
                 with np.errstate(all="ignore"):
-                    r = ev[i + h, j] / pv[i, j] - 1
+                    r = ev[i + L + h, j] / pv[i + L, j] - 1
                 m = mkt(i, h)
                 if np.isfinite(r) and np.isfinite(m):
                     r = float(np.clip(r, -0.9, 5))
@@ -204,7 +257,8 @@ def evaluate(st, fs, sig_names: dict | None = None, expect: dict | None = None) 
                     x["expect"] = b
                     if nd >= 10:
                         x["status"] = "low" if x["excess"] < b["p10"] else "high" if x["excess"] > b["p90"] else "ok"
-                        if x["status"] == "low":
+                        # a list meant to lag the market fails when it does better than history says
+                        if x["status"] == ("low" if dirn > 0 else "high"):
                             warn = warn or h
                 res["h"][str(h)] = x
             else:

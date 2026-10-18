@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .common import log
-from .factors import FactorSet, exit_price
+from .factors import ENTRY_LAG, FactorSet, fwd_ret
 
 HORIZONS = {"1q": 63, "6m": 126, "1y": 252}
 SAMPLE_EVERY = 5          # use one training row per stock per week
@@ -47,12 +47,20 @@ def feature_panel(fs: FactorSet, scores: dict[str, pd.DataFrame], dates: pd.Date
     return long.astype("float32")
 
 
+LABEL = "excess_v1"   # target: return vs the equal-weighted liquid market, entry at the next day's close
+
+
 def labels(fs: FactorSet, dates: pd.DatetimeIndex) -> pd.DataFrame:
+    """Excess return (%) over the same days' equal-weighted average of liquid stocks. Chips predict which
+    stocks beat the others, not where the whole market goes, so that is what the models learn and are judged on.
+    Entry at the close of the next trading day (data are published after the close); delisted stocks keep
+    their last traded price."""
     px = fs.price
-    ex = exit_price(px)            # a delisted stock keeps its last traded price (no survivorship bias)
+    liq = fs.liquid.fillna(False) if fs.liquid is not None else pd.DataFrame(True, index=px.index, columns=px.columns)
     out = {}
     for hk, h in HORIZONS.items():
-        fwd = (ex.shift(-h) / px - 1) * 100
+        r = fwd_ret(px, h).clip(-0.9, 5)
+        fwd = r.sub(r.where(liq).mean(axis=1), axis=0) * 100
         out[f"y_{hk}"] = fwd.reindex(dates).stack(future_stack=True)
     y = pd.concat(out, axis=1)
     y.index.names = ["date", "code"]
@@ -172,7 +180,7 @@ def backtest(X: pd.DataFrame, Y: pd.DataFrame, cal: pd.DatetimeIndex, first_test
         for yr in [y_ for y_ in years if y_ >= first_test_year]:
             test_start = pd.Timestamp(f"{yr}-01-01")
             pos = cal.searchsorted(test_start)
-            cutoff = cal[max(0, pos - h - 1)]          # purge: label must end before test year
+            cutoff = cal[max(0, pos - h - ENTRY_LAG - 1)]   # purge: label must end before test year
             tr = dates <= cutoff
             te = (dates >= test_start) & (dates < pd.Timestamp(f"{yr + 1}-01-01"))
             if tr.sum() < 20_000 or te.sum() == 0:
@@ -262,7 +270,7 @@ def _calibrate(pred: pd.DataFrame, y: pd.Series, cal: pd.DatetimeIndex, h: int) 
     pc = np.full(len(d), np.nan)
     for yr in sorted(set(dates.year)):
         start = pd.Timestamp(f"{yr}-01-01")
-        cut = cal[max(0, cal.searchsorted(start) - h - 1)]
+        cut = cal[max(0, cal.searchsorted(start) - h - ENTRY_LAG - 1)]
         fit, te = dates <= cut, dates.year == yr
         if fit.sum() < 3000 or te.sum() == 0 or up[fit].min() == up[fit].max():
             continue
@@ -342,7 +350,7 @@ def _blend_weights(bt_preds: dict, Y: pd.DataFrame, calib: dict) -> dict | None:
                   "is_only": round(res[(100, 0, 0)], 4), "ml_only": round(res[(0, 100, 0)], 4), "an_only": round(res[(0, 0, 100)], 4)},
            "n_dates": {hk: int(J.index.get_level_values("date").nunique()) for hk, J in sets.items()},
            "period": {hk: f"{J.index.get_level_values('date').min().date()} ~ {J.index.get_level_values('date').max().date()}" for hk, J in sets.items()},
-           "quarter": str(pd.Timestamp.today().to_period("Q"))}
+           "quarter": str(pd.Timestamp.today().to_period("Q")), "label": LABEL}
     log.info("blend weights: %s (avg IC final=%s default=%s)", out["weights"], out["ic"]["final"], out["ic"]["default"])
     return out
 
@@ -422,7 +430,7 @@ def is_oos_fit(X: pd.DataFrame, y: pd.Series, h: int, cal: pd.DatetimeIndex) -> 
         return None
     split = ud[int(len(ud) * IS_SHARE)]
     pos = cal.searchsorted(split)
-    oos_start = cal[min(len(cal) - 1, pos + h)]          # purge: in-sample outcomes end before OOS starts
+    oos_start = cal[min(len(cal) - 1, pos + h + ENTRY_LAG)]   # purge: in-sample outcomes end before OOS starts
     ins, oos = dates < split, dates >= oos_start
     if ins.sum() < 5_000 or oos.sum() < 2_000:
         return None
@@ -467,7 +475,7 @@ def train_models(fs: FactorSet, scores) -> dict:
     """Fit every method for every horizon. Saved and reused on weekdays (see run.py)."""
     X, Y = training_frame(fs, scores)
     dates = X.index.get_level_values("date")
-    bundle = {"cols": list(X.columns), "horizons": {}, "info": {"importance": {}, "train_rows": {}, "train_weeks": {},
+    bundle = {"cols": list(X.columns), "horizons": {}, "info": {"label": LABEL, "importance": {}, "train_rows": {}, "train_weeks": {},
               "is_oos": {}, "trained_at": str(pd.Timestamp.today().date()),
               "history_start": str(dates.min().date()) if len(dates) else None}}
     for hk, h in HORIZONS.items():

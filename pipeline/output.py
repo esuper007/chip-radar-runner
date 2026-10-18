@@ -159,5 +159,31 @@ def write(fs: FactorSet, scores: dict, fc: pd.DataFrame, fc_info: dict, metrics:
         "track": track or {},
         "health": health or {},
     }
+    summary["alerts"] = _alerts(fs, rows, sig, breakout, track)
     _dump(out_dir / "summary.js", summary)
     return {"rows": len(rows), "asof": str(t.date())}
+
+
+def _alerts(fs: FactorSet, rows: list, sig: dict | None, bo: dict | None, track: dict | None) -> dict:
+    """What a daily notification should mention (the notifier adds the viewer's watchlist):
+    live lists below their backtest range, stocks whose validated signal fired on the last day, and fresh
+    breakouts in the top fifth of a breakout model that passed validation."""
+    names = {r["c"]: r["n"] for r in rows}
+    out = {"asof": str(fs.calendar[-1].date()), "track_warn": [], "signals": [], "breakouts": []}
+    for k, v in ((track or {}).get("lists") or {}).items():
+        if v.get("warn"):
+            out["track_warn"].append({"list": v.get("name", k), "h": v["warn"]})
+    stats = (sig or {}).get("stats") or {}
+    for c, ev in ((sig or {}).get("recent") or {}).items():
+        ks = [stats[k]["name"] for k, ago in ev.items() if ago == 0 and (stats.get(k) or {}).get("valid")]
+        if ks and c in names:
+            out["signals"].append({"c": c, "n": names[c], "s": ks})
+    for mode, m in ((bo or {}).get("ml") or {}).items():
+        if not m.get("valid"):
+            continue
+        for x in (bo or {}).get("today", []):
+            p = ((x.get("ml") or {}).get(mode) or {}).get("p")
+            if x.get("d") == 0 and p is not None and p >= 80 and x["c"] in names:
+                out["breakouts"].append({"c": x["c"], "n": names[x["c"]], "mode": mode, "p": p,
+                                         "sr": ((x.get("ml") or {}).get(mode) or {}).get("sr")})
+    return out

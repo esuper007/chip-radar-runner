@@ -18,6 +18,7 @@ import os
 import re
 
 import pandas as pd
+import requests
 
 from ..common import http_get, http_json, http_bytes, log, log_fields_once, num, read_csv_bytes, record_check, roc_to_date, ymd
 from ..store import Store
@@ -289,6 +290,122 @@ def tdcc_derive(raw: pd.DataFrame) -> pd.DataFrame:
     out = out.reset_index()
     out["date"] = pd.to_datetime(out["date"].astype(str), format="%Y%m%d")
     return out
+
+
+# ---------------------------------------------------------------- 集保股權分散: one year of history
+# The open-data file only has the latest week, but TDCC's official query page keeps one year of weekly data per
+# stock. It is filled a little at a time (newest weeks first, most traded stocks first) so the holder factors
+# reach two years of history about a year sooner.
+TDCC_QRY = "https://www.tdcc.com.tw/portal/zh/smWeb/qryStock"
+TDCC_MINUTES = float(__import__("os").environ.get("TDCC_BACKFILL_MINUTES", "25"))
+
+
+def _tdcc_form(html: str) -> tuple[dict, str | None, list[str]]:
+    """Hidden inputs (incl. the anti-forgery token), the date field name and the available dates."""
+    hidden = {}
+    for tag in re.findall(r"<input[^>]+>", html, re.I):
+        n = re.search(r'name="([^"]+)"', tag)
+        if n and re.search(r'type="hidden"', tag, re.I):
+            v = re.search(r'value="([^"]*)"', tag)
+            hidden[n.group(1)] = v.group(1) if v else ""
+    date_field, dates = None, []
+    for sel in re.findall(r"<select[^>]*>.*?</select>", html, re.I | re.S):
+        opts = re.findall(r'<option[^>]*value="(\d{8})"', sel)
+        if opts:
+            nm = re.search(r'name="([^"]+)"', sel)
+            date_field, dates = (nm.group(1) if nm else "scaDate"), opts
+            break
+    return hidden, date_field, dates
+
+
+def _tdcc_parse(html: str, code: str, date: str) -> pd.DataFrame:
+    rows = []
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.I | re.S):
+        cells = [re.sub(r"<[^>]+>|&nbsp;|,|\s", "", c) for c in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.I | re.S)]
+        if len(cells) >= 5 and cells[0].isdigit() and 1 <= int(cells[0]) <= 17:
+            rows.append(dict(date=date, code=code, level=int(cells[0]), holders=num(cells[2]),
+                             shares=num(cells[3]), pct=num(cells[4])))
+    return pd.DataFrame(rows)
+
+
+def backfill_tdcc(store: Store, minutes: float = TDCC_MINUTES) -> int:
+    import time
+    from ..common import UA, _throttle
+    if minutes <= 0:
+        return 0
+    t0 = time.time()
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": UA, "Referer": TDCC_QRY})
+    try:
+        _throttle(TDCC_QRY)
+        html = sess.get(TDCC_QRY, timeout=60).text
+    except Exception as e:
+        log.warning("tdcc history: page unavailable (%s)", type(e).__name__)
+        return 0
+    hidden, date_field, dates = _tdcc_form(html)
+    stock_fields = sorted(set(re.findall(r'<input[^>]+name="([^"]*[Ss]tock[^"]*)"', html)) - set(hidden))
+    log_fields_once("tdcc-query-form", list(hidden) + [date_field or "-"] + stock_fields)
+    if not dates:
+        log.warning("tdcc history: no dates on the query page")
+        return 0
+    have = store.load("tdcc")
+    done = set()
+    if not have.empty:
+        done = set(zip(pd.to_datetime(have["date"]).dt.strftime("%Y%m%d"), have["code"].astype(str)))
+    tried = set(tuple(x) for x in (store.load_meta("tdcc_tried") or []))
+    q = store.load("quote")
+    q = q[pd.to_datetime(q["date"]) >= pd.to_datetime(q["date"]).max() - pd.Timedelta(days=40)]
+    vol = q[q["code"].astype(str).str.match(STOCK_RE)].groupby("code")["volume"].mean().sort_values(ascending=False)
+    codes = [c for c in vol.index if vol[c] >= 200_000] or list(vol.index[:1000])     # liquid stocks first
+    got, n_req, fails, buf = 0, 0, 0, []
+    for d in sorted(dates, reverse=True):
+        todo = [c for c in codes if (d, c) not in done and (d, c) not in tried]
+        for c in todo:
+            if (time.time() - t0) / 60 > minutes or fails >= 8:
+                break
+            form = dict(hidden)
+            form.update({date_field: d, "sqlMethod": "StockNo", "stockNo": c, "stockName": ""})
+            for nm in stock_fields:                      # use the page's own field names when they differ
+                form[nm] = "" if "name" in nm.lower() else c
+            try:
+                _throttle(TDCC_QRY)
+                r = sess.post(TDCC_QRY, data=form, timeout=60)
+                n_req += 1
+                if r.status_code != 200:
+                    fails += 1
+                    if r.status_code in (403, 429):
+                        time.sleep(30)
+                    continue
+                h2, _, _ = _tdcc_form(r.text)
+                hidden.update(h2)                        # the token can change after every request
+                df = _tdcc_parse(r.text, c, d)
+                if df.empty:
+                    tried.add((d, c))
+                    continue
+                buf.append(df)
+                fails = 0
+            except Exception:
+                fails += 1
+                continue
+            if len(buf) >= 200:
+                got += _tdcc_flush(store, buf)
+                buf = []
+        else:
+            continue
+        break
+    got += _tdcc_flush(store, buf)
+    store.save_meta("tdcc_tried", sorted(tried))
+    log.info("tdcc history: %d requests, %d stock-weeks added, %.0f min", n_req, got, (time.time() - t0) / 60)
+    return got
+
+
+def _tdcc_flush(store: Store, buf: list) -> int:
+    if not buf:
+        return 0
+    raw = pd.concat(buf, ignore_index=True)
+    out = tdcc_derive(raw)
+    store.append("tdcc", out)
+    return len(out)
 
 
 # ---------------------------------------------------------------- 董監持股 / 質押 (monthly)
@@ -907,6 +1024,10 @@ def daily(store: Store, d: dt.date) -> dict:
         if dd.weekday() < 5:
             res[str(dd)] = update_day(store, dd)
     update_weekly_monthly(store)
+    try:
+        res["tdcc_history"] = backfill_tdcc(store)
+    except Exception as e:
+        log.error("tdcc history failed: %s", type(e).__name__)
     return res
 
 

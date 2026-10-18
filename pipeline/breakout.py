@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 from .common import log
-from .factors import FDR_Q, FactorSet, bh_qvalues, exit_price, sign_test_p, xrank
+from .factors import ENTRY_LAG, FDR_Q, FactorSet, bh_qvalues, exit_price, sign_test_p, xrank
 from .surge import GROUPS, _Win, _fit, _score, _series, quarter_end
 
 HIGH_LOOKBACK = 250
@@ -101,8 +101,10 @@ class _Ctx:
         ev_ = exit_price(px).values.astype("float64")     # delisted stocks keep their last traded price
         for h in {h for h, _ in MODES.values()}:
             with np.errstate(all="ignore"):
-                f = ev_[h:] / pv[:-h] - 1 if h < self.T else np.empty((0, pv.shape[1]))
-            f = np.vstack([f, np.full((min(h, self.T), pv.shape[1]), np.nan)])
+                # bought at the close of the day after the breakout is confirmed (ENTRY_LAG)
+                k = h + ENTRY_LAG
+                f = ev_[k:] / pv[ENTRY_LAG:self.T - h] - 1 if k < self.T else np.empty((0, pv.shape[1]))
+            f = np.vstack([f, np.full((min(k, self.T), pv.shape[1]), np.nan)])
             f = np.where(self.liq, f, np.nan)
             self.fwd[h] = f.astype("float32")
             self.fpct[h] = pd.DataFrame(f).rank(axis=1, pct=True).values.astype("float32")
@@ -208,7 +210,7 @@ class _Ctx:
 
     def outcome(self, mode: str):
         h, q = MODES[mode]
-        known = self.ev_r + h < self.T
+        known = self.ev_r + h + ENTRY_LAG < self.T
         p = self.fpct[h][self.ev_r, self.ev_c]
         f = self.fwd[h][self.ev_r, self.ev_c]
         succ = np.where(np.isfinite(p), p >= 1 - q, np.nan)
@@ -225,7 +227,7 @@ def _validate(ctx: _Ctx, mode: str, L: int) -> dict:
     for y in sorted(set(ctx.ev_year)):
         test = (ctx.ev_year == y) & known
         y0 = np.searchsorted(cal.values, np.datetime64(f"{y}-01-01"))
-        train = known & (ctx.ev_r + h < y0)
+        train = known & (ctx.ev_r + h + ENTRY_LAG < y0)
         if test.sum() < 30 or train.sum() < 300 or np.nansum(succ[train]) < 30:
             continue
         tr = np.where(train)[0]
@@ -433,7 +435,7 @@ def ml_validate(ctx: _Ctx, mode: str, L: int) -> dict:
     for y in sorted(set(ctx.ev_year)):
         test = (ctx.ev_year == y) & known
         y0 = np.searchsorted(cal.values, np.datetime64(f"{y}-01-01"))
-        train = known & (ctx.ev_r + h < y0)
+        train = known & (ctx.ev_r + h + ENTRY_LAG < y0)
         if test.sum() < 30 or train.sum() < 1000 or np.nansum(succ[train]) < 100:
             continue
         mdl = lgb.LGBMClassifier(**ML_PARAMS).fit(X[train], succ[train].astype(int))

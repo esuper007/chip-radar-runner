@@ -42,6 +42,15 @@ def wide(df: pd.DataFrame, col: str, cal: pd.DatetimeIndex, codes: pd.Index,
     return w.astype("float32")
 
 
+ENTRY_LAG = 1   # signals use data published after the close of day t, so a position starts at the close of t+1
+
+
+def fwd_ret(px: pd.DataFrame, h: int, lag: int = ENTRY_LAG) -> pd.DataFrame:
+    """Return of a position opened at the close `lag` days after the signal day and held h trading days.
+    Entry needs a real trade on that day; the exit uses `exit_price` (delisted stocks keep their last trade)."""
+    return exit_price(px).shift(-(lag + h)) / px.shift(-lag) - 1
+
+
 def exit_price(px: pd.DataFrame) -> pd.DataFrame:
     """Price used for the END of a forward-return window.
 

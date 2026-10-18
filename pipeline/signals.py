@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 from .common import log
-from .factors import FDR_Q, FactorSet, bh_qvalues, exit_price, t_test_p
+from .factors import FDR_Q, FactorSet, bh_qvalues, fwd_ret, t_test_p
 
 HORIZONS = {"20": 20, "63": 63}
 IS_SHARE = 0.7
@@ -111,7 +111,7 @@ def evaluate(fs: FactorSet, events: dict[str, pd.DataFrame]) -> dict:
     out = {}
     fw = {}
     for hk, h in HORIZONS.items():
-        fwd = (exit_price(px).shift(-h) / px - 1).values * 100
+        fwd = fwd_ret(px, h).values * 100      # entry at the next day's close
         fwd = np.where(liq, fwd, np.nan)
         import warnings
         with warnings.catch_warnings():

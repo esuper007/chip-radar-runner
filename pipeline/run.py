@@ -116,9 +116,11 @@ def cmd_build(a):
         metrics = predict.backtest(X, Y, fs.calendar)
         del X, Y
         # blend weights are re-chosen once per quarter (kept fixed in between)
-        if old_blend and old_blend.get("quarter") == str(pd.Timestamp.today().to_period("Q")) and old_blend.get("weights"):
+        if old_blend and old_blend.get("quarter") == str(pd.Timestamp.today().to_period("Q")) and old_blend.get("weights") \
+                and old_blend.get("label") == predict.LABEL:
             metrics["blend"] = old_blend
         picks = metrics.pop("_picks", None) or {}
+        picks.update(track.shadow_picks(fs))
         for name, pk in picks.items():
             expect[name] = {"step": "week", **track.expect_series(fs, pk)}
         try:
@@ -126,17 +128,21 @@ def cmd_build(a):
         except Exception as e:
             log.warning("could not save track expectations: %s", e)
         metrics["computed_at"] = str(dt.date.today())
+        metrics["label"] = predict.LABEL
         out_dir.mkdir(parents=True, exist_ok=True)
         metrics_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=1))
     bundle = None if a.train else st.load_models()
     age = (dt.date.today() - dt.date.fromisoformat(bundle["info"]["trained_at"])).days if bundle else None
-    if bundle is None or age > 8:
-        log.info("training models (%s)", "requested" if a.train else "no saved models" if bundle is None else f"{age} days old")
+    stale_label = bundle is not None and bundle["info"].get("label") != predict.LABEL
+    if bundle is None or age > 8 or stale_label:
+        log.info("training models (%s)", "requested" if a.train else "no saved models" if bundle is None else
+                 "prediction target changed" if stale_label else f"{age} days old")
         bundle = predict.train_models(fs, scores)
         st.save_models(bundle)
     else:
         log.info("using models trained %s", bundle["info"]["trained_at"])
-    fc, info = predict.forecast(fs, scores, bundle, calib=metrics.get("calib"))
+    # a calibration fitted for another prediction target must not be applied
+    fc, info = predict.forecast(fs, scores, bundle, calib=metrics.get("calib") if metrics.get("label") == predict.LABEL else None)
     if info.get("is_oos"):
         for hk, m_ in info["is_oos"].items():
             metrics.setdefault(hk, {})["is"] = m_

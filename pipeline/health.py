@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 from .common import log
-from .factors import FDR_Q, FactorSet, alive, bh_qvalues, exit_price, t_test_p, wide
+from .factors import ENTRY_LAG, FDR_Q, FactorSet, alive, bh_qvalues, exit_price, t_test_p, wide
 
 warnings.filterwarnings("ignore", category=RuntimeWarning, module=__name__)   # empty-slice means on sparse rows
 
@@ -166,12 +166,14 @@ def compute(fs: FactorSet, store=None, base_score: pd.DataFrame | None = None) -
     S = len(samp)
     pv = px.values.astype("float64")
     ev = exit_price(px).values.astype("float64")
-    fwd, fwd_old = {}, {}
+    fwd, fwd_old, fwd_lag0 = {}, {}, {}
 
-    def _fwd(end, h):
+    L = ENTRY_LAG     # bought at the close of the next trading day (chip data come out after the close)
+
+    def _fwd(end, h, lag=L):
         f = np.full_like(pv, np.nan)
         with np.errstate(all="ignore"):
-            f[:-h] = end[h:] / pv[:-h] - 1
+            f[:T - h - lag] = end[h + lag:] / pv[lag:T - h] - 1
         return np.where(liq, f, np.nan)[samp]
 
     def _exc(f):
@@ -188,9 +190,11 @@ def compute(fs: FactorSet, store=None, base_score: pd.DataFrame | None = None) -
         if h in (20, 60):        # the old way (stocks that stop trading drop out), only to show the difference
             fo = _fwd(pv, h)
             fwd_old[h] = (pd.DataFrame(fo).rank(axis=1, pct=True).values, _exc(fo))
+            f0 = _fwd(ev, h, 0)  # the old entry timing (same day's close), only to show the difference
+            fwd_lag0[h] = (pd.DataFrame(f0).rank(axis=1, pct=True).values, _exc(f0))
             if h == 60:
-                n_recovered = int(np.isfinite(f[samp + 60 < T]).sum() - np.isfinite(fo[samp + 60 < T]).sum())
-    known20 = samp + 20 < T
+                n_recovered = int(np.isfinite(f[samp + 60 + L < T]).sum() - np.isfinite(fo[samp + 60 + L < T]).sum())
+    known20 = samp + 20 + L < T
     years = cal[samp].year.values
 
     # market regimes at each sample date, from data known on that day
@@ -219,7 +223,7 @@ def compute(fs: FactorSet, store=None, base_score: pd.DataFrame | None = None) -
             res = {"group": g, "sign": sign, "label": fs.labels.get(name, name)}
             for h in HORIZONS:
                 ic = _row_corr(x, fwd[h])
-                known = samp + h < T
+                known = samp + h + L < T
                 v = ic[known & np.isfinite(ic)]
                 res[f"ic{h}"] = round(float(np.mean(v)), 4) if len(v) >= 20 else None
                 if h == 20:
@@ -286,7 +290,7 @@ def compute(fs: FactorSet, store=None, base_score: pd.DataFrame | None = None) -
         q0 = int(np.argmax(rows))
         if q0 < MIN_HISTORY:
             continue
-        m = (samp + 20 < q0) & (samp >= q0 - LOOKBACK_DAYS)        # outcomes known before the quarter starts
+        m = (samp + 20 + L < q0) & (samp >= q0 - LOOKBACK_DAYS)        # outcomes known before the quarter starts
         if m.sum() < 40:
             continue
         irs = {n: (_ir(ic20[n][m]) or 0.0) for n in names}
@@ -349,7 +353,7 @@ def compute(fs: FactorSet, store=None, base_score: pd.DataFrame | None = None) -
             if not rows.any():
                 continue
             q0 = int(np.argmax(rows))
-            m = (samp + 20 < q0) & (samp >= q0 - LOOKBACK_DAYS)
+            m = (samp + 20 + L < q0) & (samp >= q0 - LOOKBACK_DAYS)
             best = "cluster_neutral"
             if np.isfinite(icv[best][m]).sum() >= 50:
                 means = {k: float(np.nanmean(v[m])) for k, v in icv.items() if np.isfinite(v[m]).sum() >= 50}
@@ -366,20 +370,29 @@ def compute(fs: FactorSet, store=None, base_score: pd.DataFrame | None = None) -
             variants["equal_raw"] = pd.DataFrame(b).rank(axis=1, pct=True).values
         for k, x in variants.items():
             comp[k] = _ic_stats(x, fwd[20], exc, has_w)
-            kn60 = has_w & (samp + 60 < T)
+            kn60 = has_w & (samp + 60 + L < T)
             comp[k]["ic60"] = _ic_stats(x, fwd[60], None, kn60).get("ic")
         comp["_from"] = str(cal[samp[has_w]][0].date())
         # survivorship: the composite judged with delisted stocks dropped (old) vs kept (new)
         x = variants["cluster_neutral"]
         surv = {}
         for h in (20, 60):
-            kn = has_w & (samp + h < T)
+            kn = has_w & (samp + h + L < T)
             surv[f"ic{h}_new"] = _ic_stats(x, fwd[h], None, kn).get("ic")
             surv[f"ic{h}_old"] = _ic_stats(x, fwd_old[h][0], None, kn).get("ic")
         surv["q_spread20_new"] = comp["cluster_neutral"].get("q_spread")
         surv["q_spread20_old"] = _ic_stats(x, fwd_old[20][0], fwd_old[20][1], has_w).get("q_spread")
         surv["samples_recovered_60"] = n_recovered
         comp["_survivorship"] = surv
+        # entry timing: buying at the signal day's own close (old, not actually possible) vs the next close
+        ent = {}
+        for h in (20, 60):
+            kn = has_w & (samp + h + L < T)
+            ent[f"ic{h}_next"] = _ic_stats(x, fwd[h], None, kn).get("ic")
+            ent[f"ic{h}_same"] = _ic_stats(x, fwd_lag0[h][0], None, kn).get("ic")
+        ent["q_spread20_next"] = comp["cluster_neutral"].get("q_spread")
+        ent["q_spread20_same"] = _ic_stats(x, fwd_lag0[20][0], fwd_lag0[20][1], has_w).get("q_spread")
+        comp["_entry"] = ent
     del xraw
     # the weights actually used per day follow the chosen method
     use_ir = method.isin(["ir_neutral", "ir_raw"]).values
