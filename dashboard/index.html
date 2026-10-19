@@ -299,7 +299,7 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     </tr></thead><tbody id="xwRows"></tbody></table></div>
     <details class="fold" id="xwFold"><summary>各預警的歷史驗證（和同一天、同一種多頭狀態的所有股票比較）</summary>
     <div class="scroll" id="xwStats"></div></details>
-    <p class="hint">先判斷股票「前一個交易日」是否處於多頭，再看當天籌碼是否轉差（只算第一天）。多頭有四種定義：<b>均線多頭排列</b>（10 日 &gt; 22 日 &gt; 50 日均線）、<b>正乖離高檔</b>（股價在 22 日均線之上，乖離達這檔股票過去兩年正乖離的 70 百分位以上）、<b>接近一年高點</b>（收盤在 252 日高點的 90% 以上）、<b>相對強勢</b>（120 日漲幅在全市場前 30%）。籌碼轉差有四種：綜合分數急降、散戶擁擠升溫（融資使用率、當沖比、散戶熱度等進入全市場前 10%；只有台股、陸股、日股有資料）、法人轉賣、空方加碼；另有「籌碼轉差後 10 日內跌破月線」的組合，以及兩種純價格的停利規則作為比較基準。<b>等級</b>：注意＝籌碼轉差；減碼＝籌碼轉差後又跌破 22 日均線。<b>驗證</b>：預警出現後，從下一個交易日收盤起算 20、60 日的超額報酬，減去同一天同一種多頭狀態所有股票的平均；60 日落後至少 1%、20 日也落後、至少 65% 的年份落後、最近 30% 的歷史也落後，且通過多重檢定，才標示「有效」。「賣出後仍大漲」是 60 日內仍跑贏大盤 10% 以上的比例，代表賣太早的機率。不計交易成本，不構成投資建議。</p>
+    <p class="hint">先判斷股票「前一個交易日」是否處於多頭，再看當天籌碼是否轉差（只算第一天）。多頭有四種定義：<b>均線多頭排列</b>（10 日 &gt; 22 日 &gt; 50 日均線）、<b>正乖離高檔</b>（股價在 22 日均線之上，乖離達這檔股票過去兩年正乖離的 70 百分位以上）、<b>接近一年高點</b>（收盤在 252 日高點的 90% 以上）、<b>相對強勢</b>（120 日漲幅在全市場前 30%）。籌碼轉差有四種：綜合分數急降、散戶擁擠升溫（融資使用率、當沖比、散戶熱度等進入全市場前 10%；只有台股、陸股、日股有資料）、法人轉賣、空方加碼；另有「籌碼轉差後 10 日內跌破月線」的組合，以及兩種純價格的停利規則作為比較基準。<b>等級</b>：注意＝籌碼轉差；減碼＝籌碼轉差，同時價格也轉弱（跌破 22 日均線或從高點回落 10%）；價格轉弱＝只有通過驗證的價格停利規則出現。純價格規則只在通過驗證時列出。<b>驗證</b>：預警出現後，從下一個交易日收盤起算 20、60 日的超額報酬，減去同一天同一種多頭狀態所有股票的平均；60 日落後至少 1%、20 日也落後、至少 65% 的年份落後、最近 30% 的歷史也落後，且通過多重檢定，才標示「有效」。「賣出後仍大漲」是 60 日內仍跑贏大盤 10% 以上的比例，代表賣太早的機率。不計交易成本，不構成投資建議。</p>
   </section>
 
   <section class="panel" aria-label="實戰成績單">
@@ -989,22 +989,25 @@ function renderTrack(){
 
 
 // ---------- exit warnings (uptrend + chips turning worse) ----------
-const XW_LEVEL = {1: ["third", "注意"], 2: ["ng", "減碼"]};
+const XW_LEVEL = {1: ["third", "注意"], 2: ["ng", "減碼"], 3: ["third", "價格轉弱"]};
+const XW_ORDER = {0: 0, 3: 1, 1: 2, 2: 3};
 ["xwMine","xwValid","xwBull"].forEach(id => { try { const v = localStorage.getItem(id); if (v != null){ if ($(id).type === "checkbox") $(id).checked = v === "1"; else $(id).value = v; } } catch (e) {}
   $(id).addEventListener("change", () => { try { localStorage.setItem(id, $(id).type === "checkbox" ? ($(id).checked ? "1" : "0") : $(id).value); } catch (e) {} renderExits(); }); });
 function xwValidPair(k, bulls){ const st = S.summary[S.market]?.exits?.stats?.[k] || {}; return [...bulls, "any"].some(b => st[b]?.valid); }
 // warnings of one stock: [{k, ago, bs, valid}], chip and combo triggers only
 function xwOf(r, onlyValid, bull = "any"){
   const T = S.summary[S.market]?.exits?.triggers || {};
-  return (r.xw || []).filter(([k, , bs]) => ["chip", "combo"].includes(T[k]?.[2]) && (bull === "any" || bs.includes(bull)))
-    .map(([k, ago, bs]) => ({k, ago, bs, valid: xwValidPair(k, bull === "any" ? bs : [bull])})).filter(x => !onlyValid || x.valid);
+  return (r.xw || []).filter(([k, , bs]) => T[k] && (bull === "any" || bs.includes(bull)))
+    .map(([k, ago, bs]) => ({k, ago, bs, kind: T[k][2], valid: xwValidPair(k, bull === "any" ? bs : [bull])}))
+    .filter(x => x.valid || (!onlyValid && x.kind !== "price"));
 }
 function xwBadge(r){
   const ws = xwOf(r, true), lv = xwLevel(ws);
   if (lv) return `<span class="sig neg" title="${ws.map(w => esc((S.summary[S.market]?.exits?.triggers?.[w.k] || [w.k])[0])).join("、")}">賣出預警：${XW_LEVEL[lv][1]}</span>`;
   return r.xb ? `<span class="sig pos" title="符合多頭定義：${r.xb.map(b => esc((S.summary[S.market]?.exits?.bull_defs?.[b] || [b])[0])).join("、")}">多頭中</span>` : "";
 }
-function xwLevel(ws){ return ws.some(x => x.k === "chip_price") ? 2 : ws.length ? 1 : 0; }
+// 2 = reduce (chips worse and the price broke), 1 = watch (chips worse), 3 = only a validated price rule fired
+function xwLevel(ws){ const k = new Set(ws.map(x => x.kind)); return k.has("combo") || (k.has("chip") && k.has("price")) ? 2 : k.has("chip") ? 1 : k.has("price") ? 3 : 0; }
 function renderExits(){
   const sm = S.summary[S.market] || {}, X = sm.exits || {}, sc = S.screen[S.market];
   const T = X.triggers || {}, B = X.bull_defs || {}, ST = X.stats || {};
@@ -1019,7 +1022,7 @@ function renderExits(){
   const onlyValid = $("xwValid").checked, mine = $("xwMine").checked, bull = $("xwBull").value;
   if (sc){
     const list = sc.rows.map(r => ({r, ws: xwOf(r, onlyValid, bull)})).filter(x => x.ws.length && (!mine || wlHas(x.r.c)))
-      .sort((a, b) => xwLevel(b.ws.filter(w => w.valid)) - xwLevel(a.ws.filter(w => w.valid)) || xwLevel(b.ws) - xwLevel(a.ws) || Math.min(...a.ws.map(w => w.ago)) - Math.min(...b.ws.map(w => w.ago)));
+      .sort((a, b) => XW_ORDER[xwLevel(b.ws.filter(w => w.valid))] - XW_ORDER[xwLevel(a.ws.filter(w => w.valid))] || Math.min(...a.ws.map(w => w.ago)) - Math.min(...b.ws.map(w => w.ago)));
     const BN = {ma: "均線", bias: "乖離", high52: "近高點", rs: "強勢"};
     tb.innerHTML = list.length ? list.slice(0, 80).map(({r, ws}) => { const lv = XW_LEVEL[xwLevel(ws.filter(w => w.valid))] || ["third", "僅供參考"], q = q50(r, "1q", "avg");
       return `<tr data-c="${esc(r.c)}" tabindex="0"><td class="l num">${esc(r.c)}</td><td class="l">${esc(r.n)}</td><td class="num">${fmt(r.px,2)}</td>

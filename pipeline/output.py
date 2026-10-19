@@ -203,11 +203,13 @@ def _alerts(fs: FactorSet, rows: list, sig: dict | None, bo: dict | None, track:
     st_ = (exits or {}).get("stats") or {}
     tn = (exits or {}).get("triggers") or {}
     for c, evs in ((exits or {}).get("recent") or {}).items():
-        hits = [k for k, back, bs in evs if back == 0 and tn.get(k, [None, None, ""])[2] in ("chip", "combo")
+        hits = [k for k, back, bs in evs if back == 0 and k in tn
                 and any((st_.get(k) or {}).get(b, {}).get("valid") for b in bs + ["any"])]
         if hits and c in names:
-            out["exits"].append({"c": c, "n": names[c], "t": [tn[k][0] for k in hits],
-                                 "level": 2 if "chip_price" in hits else 1})
+            kinds = {tn[k][2] for k in hits}
+            # 2 = reduce (chips worse and price broke), 1 = watch (chips worse), 3 = price only turned weak
+            level = 2 if "combo" in kinds or {"chip", "price"} <= kinds else 1 if "chip" in kinds else 3
+            out["exits"].append({"c": c, "n": names[c], "t": [tn[k][0] for k in hits], "level": level})
     F = (health or {}).get("factors") or {}
     out["decay"] = [{"name": F.get(n, {}).get("label", n), "ic": (F.get(n, {}).get("recent") or {}).get("ic"),
                      "long": (F.get(n, {}).get("recent") or {}).get("long")} for n in ((health or {}).get("decay") or [])]
