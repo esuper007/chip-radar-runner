@@ -4,7 +4,7 @@ A warning is an EVENT: the first day a trigger becomes true for a stock that was
 Uptrend definitions (all use data known that day):
   ma      10/22/50-day moving averages in bullish order (10 > 22 > 50)
   bias    positive gap to the 22-day average at or above the 70th percentile of the stock's own positive gaps
-          over the previous two years
+          over the previous three years
   high52  close within 10% of the 252-day high
   rs      120-day return in the top 30% of liquid stocks
   any     any of the above
@@ -35,7 +35,7 @@ from .factors import ENTRY_LAG, FDR_Q, FactorSet, bh_qvalues, exit_price, fwd_re
 
 BULL = {
     "ma": ("均線多頭排列", "10 日、22 日、50 日均線由上而下排列（10 > 22 > 50）"),
-    "bias": ("正乖離高檔", "股價高於 22 日均線，且乖離幅度達這檔股票過去兩年正乖離的 70 百分位以上"),
+    "bias": ("正乖離高檔", "股價高於 22 日均線，且乖離幅度達這檔股票過去三年正乖離的 70 百分位以上"),
     "high52": ("接近一年高點", "收盤價在 252 日最高價的 90% 以上"),
     "rs": ("相對強勢", "120 日漲幅在流動性足夠股票的前 30%"),
     "any": ("任一多頭定義", "符合以上任一種"),
@@ -76,7 +76,7 @@ def _bull(fs: FactorSet, liq: np.ndarray) -> dict[str, np.ndarray]:
     pos = bias.where(bias > 0)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        thr = pos.rolling(504, min_periods=120).quantile(0.7).shift(1)
+        thr = pos.rolling(756, min_periods=120).quantile(0.7).shift(1)
     out["bias"] = ((bias > 0) & (bias >= thr)).values
     out["high52"] = (px >= px.rolling(252, min_periods=200).max() * 0.9).values
     r120 = (px / px.shift(120) - 1).where(liq)
