@@ -50,7 +50,7 @@ DOWN = {"down_1q"}       # lists expected to lag the market (a warning means the
 
 
 def list_dir(name: str, market: str) -> int:
-    if name in DOWN:
+    if name in DOWN or name.startswith("exit:"):
         return -1
     if name.startswith("shadow:"):
         return SHADOW.get(market, {}).get(name[7:], (1, ""))[0]
@@ -94,7 +94,8 @@ def _blend(fc: pd.DataFrame, hk: str, stat: str, weights: dict | None = None) ->
     return (num / den.where(den > 0)).dropna()
 
 
-def record(st, fs, fc: pd.DataFrame, sig: dict | None, bo: dict | None, weights: dict | None = None) -> int:
+def record(st, fs, fc: pd.DataFrame, sig: dict | None, bo: dict | None, weights: dict | None = None,
+           ex: dict | None = None) -> int:
     """weights: blend weights of the three models (same as the dashboard default), {is, ml, an} in %."""
     t = fs.calendar[-1]
     liq = fs.liquid.loc[t] if fs.liquid is not None else pd.Series(True, index=fs.codes)
@@ -130,6 +131,12 @@ def record(st, fs, fc: pd.DataFrame, sig: dict | None, bo: dict | None, weights:
         scored = [x for x in today if sc(x) is not None]
         if scored:
             add("bo_top", [(x["c"], sc(x)) for x in scored if sc(x) >= 80])
+    # exit warnings (stocks in an uptrend whose chips turned worse today): expected to lag the market
+    for c, evs in ((ex or {}).get("recent") or {}).items():
+        if c in ok:
+            for k, back, _ in evs:
+                if back == 0 and (ex.get("triggers") or {}).get(k, [None, None, ""])[2] in ("chip", "combo"):
+                    add(f"exit:{k}", [(c, None)])
     for f in SHADOW.get(fs.market, {}):
         x = fs.factors.get(f)
         if x is not None:
@@ -197,7 +204,7 @@ def _band(exp: dict, h: str, n_days: int, step: str) -> dict | None:
             "p90": round(float(roll.quantile(0.9)) * 100, 2), "n_hist": int(len(v)), "k": int(k)}
 
 
-def evaluate(st, fs, sig_names: dict | None = None, expect: dict | None = None) -> dict:
+def evaluate(st, fs, sig_names: dict | None = None, expect: dict | None = None, exit_names: dict | None = None) -> dict:
     """expect: {list: {"step": "week"|"event", "h": expect_series(...)}} from the backtest."""
     picks = st.load(DATASET)
     if picks is None or picks.empty:
@@ -226,6 +233,7 @@ def evaluate(st, fs, sig_names: dict | None = None, expect: dict | None = None) 
 
     for name, g in picks.groupby("list"):
         nm = LIST_NAMES.get(name) or (f"起漲訊號：{(sig_names or {}).get(name[4:], name[4:])}" if name.startswith("sig:") else
+                                      f"賣出預警：{(exit_names or {}).get(name[5:], name[5:])}（應落後）" if name.startswith("exit:") else
                                       SHADOW.get(fs.market, {}).get(name[7:], (1, name))[1] if name.startswith("shadow:") else name)
         dirn = list_dir(name, fs.market)
         ex0 = (expect or {}).get(name) or {}
@@ -235,7 +243,7 @@ def evaluate(st, fs, sig_names: dict | None = None, expect: dict | None = None) 
                 dirn = -1 if np.mean(e["v"]) < 0 else 1
             nm += "（回測平均" + ("落後" if dirn < 0 else "領先") + "大盤）"
         res = {"name": nm, "picks": int(len(g)), "days": int(g["date"].nunique()), "h": {}, "dir": dirn,
-               "shadow": name.startswith("shadow:")}
+               "shadow": name.startswith("shadow:"), "exit": name.startswith("exit:")}
         ex = (expect or {}).get(name) or {}
         warn = None
         for h in HORIZONS:

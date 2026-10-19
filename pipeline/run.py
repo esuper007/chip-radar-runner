@@ -139,7 +139,7 @@ def cmd_build(a):
         except Exception:
             log.exception("portfolio backtest failed")
         try:
-            st.save_meta("track_expect", {k: v for k, v in expect.items() if not k.startswith(("bo", "sig:"))})
+            st.save_meta("track_expect", {k: v for k, v in expect.items() if not k.startswith(("bo", "sig:", "exit:"))})
         except Exception as e:
             log.warning("could not save track expectations: %s", e)
         metrics["computed_at"] = str(dt.date.today())
@@ -188,6 +188,12 @@ def cmd_build(a):
     except Exception:
         log.exception("signals failed")
         sig = None
+    from . import exits
+    ex = None
+    try:
+        ex = exits.compute(fs, scores)
+    except Exception:
+        log.exception("exit warnings failed")
     sg = None      # 飆股相似度 retired 2026-10 (never passed validation); replaced by breakout analysis
     from . import breakout
     try:
@@ -207,9 +213,12 @@ def cmd_build(a):
                 if len(r):
                     expect[f"sig:{k}"] = {"step": "event", **track.expect_series(
                         fs, pd.DataFrame({"date": ee.index[r], "code": ee.columns[c]}), horizons=(20, 63))}
+        for k, pk in ((ex or {}).pop("_events", None) or {}).items():
+            expect[f"exit:{k}"] = {"step": "event", **track.expect_series(fs, pk, horizons=(20, 63))}
         bw = (metrics.get("blend") or {}).get("weights")
-        track.record(st, fs, fc, sig, bo, bw)
-        trk = track.evaluate(st, fs, {k: v.get("name") for k, v in ((sig or {}).get("stats") or {}).items()}, expect)
+        track.record(st, fs, fc, sig, bo, bw, ex=ex)
+        trk = track.evaluate(st, fs, {k: v.get("name") for k, v in ((sig or {}).get("stats") or {}).items()}, expect,
+                             {k: v[0] for k, v in ((ex or {}).get("triggers") or {}).items()})
         trk["weights"] = bw or track.W_PCT
         trk["gain_new"] = track.new_entries(st, "gain_1q")
         try:
@@ -227,7 +236,7 @@ def cmd_build(a):
                 "weights_from": str(wts.index.min().date()) if len(wts) else None,
                 **{k: hres.get(k) for k in ("clusters", "corr", "composite", "sbl_split", "regime_share", "fdr_q", "min_weeks", "method", "decay")}}
     res = output.write(fs, scores, fc, info, metrics, freshness, m.KEY_FACTORS, qrep, sig, sg, bo, trk, hsum,
-                       contrib=contrib)
+                       contrib=contrib, exits=ex)
     log.info("build done: %s", res)
 
 

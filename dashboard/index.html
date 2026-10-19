@@ -286,6 +286,22 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
     <p class="hint">做法：收盤價創下前 250 個交易日的新高、且前 60 日內沒創過新高（整理後的第一次突破）視為一次「突破」。成功標準有兩種：突破後半年（126 個交易日）報酬落在同日全市場前 10%，或突破後一年（252 個交易日）報酬落在前 20%。觀察突破前 L 日的籌碼：突破前半年（123 日）平均、更早的前段平均（L &gt; 123 時）、兩段的變化，以及突破前 20 日；L 由系統每季在 123、189、255 日中挑選。拿「成功的突破」和「所有突破」比較，找出成功突破明顯不同的籌碼特徵並加權。驗證時只用之前已知結果的突破建立樣貌，檢查每年排名前 20% 的突破成功率是否高於當年所有突破；提升倍數 ≥ 1.3 且報酬優於所有突破平均才標示「有效」。「歷史成功率」來自逐年驗證中同一排名區間的實際結果。這些是機率，不保證個股會上漲。</p>
   </section>
 
+  <section class="panel" aria-label="多頭籌碼轉差預警">
+    <div class="sec-head"><h2>多頭籌碼轉差預警：上漲中的股票，籌碼開始變差</h2>
+      <div class="toolbar">
+        <label><input type="checkbox" id="xwMine"> 只看觀察清單</label>
+        <label><input type="checkbox" id="xwValid" checked> 只看回測有效的預警</label>
+        <select id="xwBull" aria-label="多頭定義"><option value="any">任一多頭定義</option><option value="ma">均線多頭排列</option><option value="bias">正乖離高檔</option><option value="high52">接近一年高點</option><option value="rs">相對強勢</option></select>
+      </div></div>
+    <p class="hint" id="xwStatus" style="margin:0 0 10px"></p>
+    <div class="scroll"><table class="grid"><thead><tr>
+      <th class="l">代號</th><th class="l">名稱</th><th>收盤</th><th class="l">多頭定義</th><th class="l">預警（幾個交易日前）</th><th>等級</th><th>籌碼分數</th><th title="加權綜合的 1 季預估超額報酬">1季預估超額</th><th></th>
+    </tr></thead><tbody id="xwRows"></tbody></table></div>
+    <details class="fold" id="xwFold"><summary>各預警的歷史驗證（和同一天、同一種多頭狀態的所有股票比較）</summary>
+    <div class="scroll" id="xwStats"></div></details>
+    <p class="hint">先判斷股票「前一個交易日」是否處於多頭，再看當天籌碼是否轉差（只算第一天）。多頭有四種定義：<b>均線多頭排列</b>（10 日 &gt; 22 日 &gt; 50 日均線）、<b>正乖離高檔</b>（股價在 22 日均線之上，乖離達這檔股票過去兩年正乖離的 70 百分位以上）、<b>接近一年高點</b>（收盤在 252 日高點的 90% 以上）、<b>相對強勢</b>（120 日漲幅在全市場前 30%）。籌碼轉差有四種：綜合分數急降、散戶擁擠升溫（融資使用率、當沖比、散戶熱度等進入全市場前 10%；只有台股、陸股、日股有資料）、法人轉賣、空方加碼；另有「籌碼轉差後 10 日內跌破月線」的組合，以及兩種純價格的停利規則作為比較基準。<b>等級</b>：注意＝籌碼轉差；減碼＝籌碼轉差後又跌破 22 日均線。<b>驗證</b>：預警出現後，從下一個交易日收盤起算 20、60 日的超額報酬，減去同一天同一種多頭狀態所有股票的平均；60 日落後至少 1%、20 日也落後、至少 65% 的年份落後、最近 30% 的歷史也落後，且通過多重檢定，才標示「有效」。「賣出後仍大漲」是 60 日內仍跑贏大盤 10% 以上的比例，代表賣太早的機率。不計交易成本，不構成投資建議。</p>
+  </section>
+
   <section class="panel" aria-label="實戰成績單">
     <div class="sec-head"><h2>實戰成績單：每天的名單，後來真的表現如何</h2></div>
     <p class="hint" id="trkStatus" style="margin:0 0 10px"></p>
@@ -416,7 +432,7 @@ async function loadMarket(){
     renderSummary();
     if (!S.screen[m]) S.screen[m] = await getJSON(dataUrl("screen"));
     if (m !== S.market) return;
-    buildFilters(); renderRows(); renderRank(); renderSignals(); renderBreakout(); renderTrack(); renderPortfolio(); renderHealth(); renderWatch();
+    buildFilters(); renderRows(); renderRank(); renderSignals(); renderBreakout(); renderExits(); renderTrack(); renderPortfolio(); renderHealth(); renderWatch();
   }catch(e){
     if (m !== S.market) return;
     if (!(e && e.status)) console.error("render failed", e);
@@ -670,6 +686,12 @@ async function openStock(code){
       <div class="actions"><button class="btn" id="dWatch"></button><button class="btn" id="dClose">關閉</button></div></div>
     <div class="panel" style="display:grid;gap:12px"><div style="display:flex;gap:16px;align-items:baseline;flex-wrap:wrap"><span class="big">${fmt(r.sc,1)}</span><span class="muted">籌碼綜合分數（全市場百分位，50 為中性）</span></div><div class="subgrid">${subs}</div>
       <div class="sigs" style="flex-wrap:wrap">${(r.sig||[]).map(t=>`<span class="sig ${isPos(t)?"pos":"neg"}">${esc(t)}</span>`).join("") || `<span class="muted">目前沒有特別的籌碼訊號</span>`}</div></div>
+    ${(() => { const X = sum.exits || {}, B = X.bull_defs || {}, T = X.triggers || {}; if (!X.stats) return "";
+      const all = xwOf(r, false), lv = xwLevel(xwOf(r, true));
+      if (!r.xb && !all.length) return "";
+      return `<div class="panel"><h2>多頭狀態與籌碼轉差預警</h2><p style="margin:0 0 6px">${r.xb ? `目前符合多頭定義：${r.xb.map(b => `<span class="pill third">${esc((B[b]||[b])[0])}</span>`).join(" ")}` : `<span class="muted">目前不符合任何多頭定義</span>`}</p>
+        ${all.length ? `<p style="margin:0">近 5 個交易日的預警：${all.map(w => `<span class="sig neg" title="${esc((T[w.k]||[])[1]||"")}">${esc((T[w.k]||[w.k])[0])} ${w.ago === 0 ? "今天" : w.ago + " 日前"}${w.valid ? "" : "（未通過驗證）"}</span>`).join(" ")}${lv ? `　等級 <span class="pill ${XW_LEVEL[lv][0]}">${XW_LEVEL[lv][1]}</span>` : ""}</p>` : `<p class="muted" style="margin:0">近 5 個交易日沒有籌碼轉差預警。</p>`}
+        <p class="hint" style="margin-top:6px">預警只在回測證實「多頭中的股票出現這種籌碼轉差後，之後確實落後」時才標示等級；未通過驗證的只供參考。詳見首頁「多頭籌碼轉差預警」。</p></div>`; })()}
     ${ctHtml}
     <div class="panel"><h2>未來相對大盤的表現預測（含息超額報酬）</h2><div class="fc">${fcRows}</div>
       <p class="fc-legend">粗線為 10%–90% 可能區間，圓點為中位數。由上而下：灰色＝歷史相似情境，橘色＝樣本內外模型（樣本內建模、樣本外驗證，區間取自樣本外誤差），青色＝機器學習。虛線為 0%。</p></div>
@@ -965,6 +987,66 @@ function renderTrack(){
 }
 
 
+
+// ---------- exit warnings (uptrend + chips turning worse) ----------
+const XW_LEVEL = {1: ["third", "注意"], 2: ["ng", "減碼"]};
+["xwMine","xwValid","xwBull"].forEach(id => { try { const v = localStorage.getItem(id); if (v != null){ if ($(id).type === "checkbox") $(id).checked = v === "1"; else $(id).value = v; } } catch (e) {}
+  $(id).addEventListener("change", () => { try { localStorage.setItem(id, $(id).type === "checkbox" ? ($(id).checked ? "1" : "0") : $(id).value); } catch (e) {} renderExits(); }); });
+function xwValidPair(k, bulls){ const st = S.summary[S.market]?.exits?.stats?.[k] || {}; return [...bulls, "any"].some(b => st[b]?.valid); }
+// warnings of one stock: [{k, ago, bs, valid}], chip and combo triggers only
+function xwOf(r, onlyValid, bull = "any"){
+  const T = S.summary[S.market]?.exits?.triggers || {};
+  return (r.xw || []).filter(([k, , bs]) => ["chip", "combo"].includes(T[k]?.[2]) && (bull === "any" || bs.includes(bull)))
+    .map(([k, ago, bs]) => ({k, ago, bs, valid: xwValidPair(k, bull === "any" ? bs : [bull])})).filter(x => !onlyValid || x.valid);
+}
+function xwBadge(r){
+  const ws = xwOf(r, true), lv = xwLevel(ws);
+  if (lv) return `<span class="sig neg" title="${ws.map(w => esc((S.summary[S.market]?.exits?.triggers?.[w.k] || [w.k])[0])).join("、")}">賣出預警：${XW_LEVEL[lv][1]}</span>`;
+  return r.xb ? `<span class="sig pos" title="符合多頭定義：${r.xb.map(b => esc((S.summary[S.market]?.exits?.bull_defs?.[b] || [b])[0])).join("、")}">多頭中</span>` : "";
+}
+function xwLevel(ws){ return ws.some(x => x.k === "chip_price") ? 2 : ws.length ? 1 : 0; }
+function renderExits(){
+  const sm = S.summary[S.market] || {}, X = sm.exits || {}, sc = S.screen[S.market];
+  const T = X.triggers || {}, B = X.bull_defs || {}, ST = X.stats || {};
+  const tb = $("xwRows");
+  if (!X.stats){ $("xwStatus").textContent = "這個市場的預警會在下次資料更新後出現。"; tb.innerHTML = ""; $("xwStats").innerHTML = ""; return; }
+  const nValid = Object.values(ST).reduce((a, d) => a + Object.values(d).filter(v => v.valid).length, 0);
+  const nb = X.n_bull_today || {};
+  $("xwStatus").innerHTML = `今天處於多頭的股票：均線多頭排列 ${fmt(nb.ma||0,0)}、正乖離高檔 ${fmt(nb.bias||0,0)}、接近一年高點 ${fmt(nb.high52||0,0)}、相對強勢 ${fmt(nb.rs||0,0)} 檔。` +
+    (nValid ? `通過驗證的「預警 × 多頭定義」組合：<b>${nValid}</b> 個。` : `<span class="pill ng">目前沒有通過驗證的預警</span> 籌碼轉差在這個市場還不能可靠地預測上漲股會落後，預設不列出名單；取消勾選「只看回測有效的預警」可看全部（僅供參考）。`);
+  $("xwFold").open = nValid > 0 && $("xwFold").dataset.touched !== "1";
+  $("xwFold").ontoggle = () => { $("xwFold").dataset.touched = "1"; };
+  const onlyValid = $("xwValid").checked, mine = $("xwMine").checked, bull = $("xwBull").value;
+  if (sc){
+    const list = sc.rows.map(r => ({r, ws: xwOf(r, onlyValid, bull)})).filter(x => x.ws.length && (!mine || wlHas(x.r.c)))
+      .sort((a, b) => xwLevel(b.ws.filter(w => w.valid)) - xwLevel(a.ws.filter(w => w.valid)) || xwLevel(b.ws) - xwLevel(a.ws) || Math.min(...a.ws.map(w => w.ago)) - Math.min(...b.ws.map(w => w.ago)));
+    const BN = {ma: "均線", bias: "乖離", high52: "近高點", rs: "強勢"};
+    tb.innerHTML = list.length ? list.slice(0, 80).map(({r, ws}) => { const lv = XW_LEVEL[xwLevel(ws.filter(w => w.valid))] || ["third", "僅供參考"], q = q50(r, "1q", "avg");
+      return `<tr data-c="${esc(r.c)}" tabindex="0"><td class="l num">${esc(r.c)}</td><td class="l">${esc(r.n)}</td><td class="num">${fmt(r.px,2)}</td>
+        <td class="l">${[...new Set(ws.flatMap(w => w.bs))].map(b => `<span class="pill third">${BN[b] || b}</span>`).join(" ")}</td>
+        <td class="l wrapc">${ws.map(w => `<span class="sig neg" title="${esc(T[w.k]?.[1] || "")}">${esc(T[w.k]?.[0] || w.k)} ${w.ago === 0 ? "今天" : w.ago + " 日前"}${w.valid ? "" : "（未通過）"}</span>`).join(" ")}</td>
+        <td><span class="pill ${lv[0]}">${lv[1]}</span></td><td class="num">${fmt(r.sc,1)}</td><td class="num ${tone(q)}">${sgn(q)}</td>
+        <td><button class="star ${wlHas(r.c)?"on":""}" data-star="${esc(r.c)}" aria-label="${wlHas(r.c)?"移出":"加入"}觀察清單：${esc(r.n)}">${wlHas(r.c)?"★":"☆"}</button></td></tr>`; }).join("")
+      : `<tr><td colspan="9" class="empty"><strong>${onlyValid && !nValid ? "沒有通過驗證的預警" : "近 5 個交易日沒有符合條件的股票"}</strong>${mine ? "你的觀察清單中沒有出現預警。" : ""}</td></tr>`;
+  }
+  // validation tables
+  const bulls = Object.keys(B).filter(b => Object.values(ST).some(d => d[b]));
+  const keys = Object.keys(T).filter(k => ST[k]);
+  const cell = v => !v || !v.n || v.diff60 == null ? `<td class="num muted">—</td>` : `<td class="num ${v.diff60 < 0 ? "down" : "up"}" title="事件 ${fmt(v.n,0)} 次；20 日 ${sgn(v.diff20)}；q=${v.q == null ? "—" : fmt(v.q,3)}">${sgn(v.diff60)}${v.valid ? ' <span class="pill ok2">有效</span>' : ""}</td>`;
+  const sel = bull;
+  $("xwStats").innerHTML = `<table class="mq"><thead><tr><th>預警</th>${bulls.map(b => `<th>${esc(B[b][0])}</th>`).join("")}</tr></thead><tbody>
+    ${keys.map(k => `<tr><td>${esc(T[k][0])}${T[k][2] === "price" ? ' <span class="muted">（比較基準）</span>' : ""}</td>${bulls.map(b => cell(ST[k][b])).join("")}</tr>`).join("")}</tbody></table>
+    <p class="hint" style="margin:4px 0 12px">數字是 60 日超額報酬「預警股票 − 同一天同一種多頭狀態的所有股票」；負數代表預警後確實落後（賣出是對的）。滑鼠移到數字上可看事件數、20 日結果與多重檢定 q 值。</p>
+    <h2 style="font-size:14px;margin:8px 0 4px">${esc(B[sel]?.[0] || sel)}：詳細結果</h2>
+    <table class="mq"><thead><tr><th>預警</th><th>事件數</th><th>20 日差距</th><th>60 日差距</th><th>60 日內最大跌幅差距</th><th>賣出後仍大漲</th><th>落後的年份</th><th>最近 30% 歷史</th><th>q 值</th><th>判定</th></tr></thead><tbody>
+    ${keys.map(k => { const v = ST[k][sel]; if (!v || !v.n || v.diff60 == null) return `<tr><td>${esc(T[k][0])}</td><td class="num">${fmt(v?.n||0,0)}</td><td colspan="8" class="muted">事件太少</td></tr>`;
+      return `<tr><td>${esc(T[k][0])}</td><td class="num">${fmt(v.n,0)}</td><td class="num ${tone(v.diff20)}">${sgn(v.diff20)}</td><td class="num ${tone(v.diff60)}"><b>${sgn(v.diff60)}</b></td><td class="num ${tone(v.dd)}">${sgn(v.dd)}</td>
+        <td class="num">${pct(v.big)} <span class="muted">vs ${pct(v.big_ctrl)}</span></td><td class="num">${v.years_lag}/${v.years}</td><td class="num ${tone(v.oos_diff60)}">${v.oos_diff60 == null ? "—" : sgn(v.oos_diff60)}</td>
+        <td class="num">${v.q == null ? "—" : fmt(v.q,3)}</td><td>${v.valid ? '<span class="pill ok2">有效</span>' : '<span class="pill third">未通過</span>'}</td></tr>`; }).join("")}</tbody></table>
+    <p class="hint" style="margin-top:6px">「60 日內最大跌幅差距」負數代表預警股票之後跌得比較深；「賣出後仍大漲」是預警股票 60 日內仍跑贏大盤 10% 以上的比例（vs 同一多頭狀態的所有股票）。「最近 30% 歷史」從 ${esc(X.oos_from || "")} 起。</p>`;
+}
+$("xwRows").addEventListener("click", e => { const st = e.target.closest("[data-star]"); if (st){ e.stopPropagation(); wlToggle(st.dataset.star).then(renderExits); return; }
+  const tr = e.target.closest("tr[data-c]"); if (tr) openStock(tr.dataset.c); });
 // ---------- portfolio backtest ----------
 const PF = {list: null};
 try { PF.list = localStorage.getItem("pfList"); } catch (e) {}
@@ -1158,7 +1240,7 @@ async function renderWatch(){
       <td class="hide-sm" data-sp="${esc(r.c)}">${r.liq ? "" : `<span class="muted" title="流動性不足的股票不提供歷史序列">—</span>`}</td>
       <td class="hide-sm"><span class="subs">${subs}</span></td>
       <td>${(() => { const q = q50(r,"1q","avg"), p = pUp(r,"1q","avg") ?? v; return q == null && p == null ? `<span class="pp muted">累積中</span>` : `<span class="pp ${tone(q)}">${sgn(q)}</span>${p != null ? `<br><small class="muted" title="跑贏大盤機率">${pct(p)}</small>` : ""}`; })()}</td>
-      <td class="l wrapc"><span class="sigs" style="flex-wrap:wrap">${bsChips(r, false)}${(r.sig||[]).map(t=>`<span class="sig ${isPos(t)?"pos":"neg"}">${esc(t)}</span>`).join("") || (r.bs ? "" : `<span class="muted">無特別訊號</span>`)}</span></td>
+      <td class="l wrapc"><span class="sigs" style="flex-wrap:wrap">${xwBadge(r)}${bsChips(r, false)}${(r.sig||[]).map(t=>`<span class="sig ${isPos(t)?"pos":"neg"}">${esc(t)}</span>`).join("") || (r.bs ? "" : `<span class="muted">無特別訊號</span>`)}</span></td>
       <td><button class="star on" data-unwatch="${esc(r.c)}" aria-label="移除 ${esc(r.n)}">★</button></td></tr>`; }).join("");
   // score changes from the daily series (liquid stocks only)
   for (const {c} of mine){
