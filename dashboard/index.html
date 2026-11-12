@@ -2,26 +2,29 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700;900&display=swap">
 <style>
-/* Layout: terminal-style working surface — sticky market bar, market pulse strip, ranked table, detail drawer. */
+/* Layout: investment-bank research note — navy masthead band, white exhibit panels with a navy top rule, ruled tables with tabular figures, gold used only for the active state. */
 :root{
-  --bg:#eef1f0; --surface:#ffffff; --sunk:#e4e9e7; --ink:#15201e; --muted:#5b6865; --line:#d3dbd8;
-  --accent:#0b5d63; --accent-ink:#ffffff; --accent-soft:#d7ebea;
-  --up:#c8102e; --down:#0e8a55; --warn:#a86400; --flat:#7a8683;
+  --bg:#f2f4f7; --surface:#ffffff; --sunk:#e9edf2; --ink:#14202e; --muted:#5d6878; --line:#d5dbe3;
+  --navy:#0b2545; --navy-ink:#ffffff; --navy-soft:#b9c6d8; --gold:#a8874a; --steel:#2c5a8c;
+  --accent:#0b2545; --accent-ink:#ffffff; --accent-soft:#e3eaf3; --rule:#0b2545;
+  --up:#b3122e; --down:#0d7a4c; --warn:#a66a00; --flat:#7b8594;
   --f-display:"Noto Serif TC","Songti TC",serif;
-  --f-body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
-  --f-num:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
-  --r:6px;
+  --f-body:"IBM Plex Sans","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --f-num:"IBM Plex Sans","Noto Sans TC",system-ui,sans-serif;
+  --r:2px;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#0f1514; --surface:#161e1d; --sunk:#1c2625; --ink:#e3ebe9; --muted:#93a29e; --line:#2a3634;
-  --accent:#58b6bb; --accent-ink:#0b1514; --accent-soft:#1d3536;
-  --up:#ff6b6b; --down:#3fcb8b; --warn:#f0a43a; --flat:#8a9794; color-scheme:dark}}
+  --bg:#0a0f16; --surface:#111925; --sunk:#172231; --ink:#e4e9f0; --muted:#97a3b4; --line:#253244;
+  --navy:#0e2340; --navy-ink:#eef2f7; --navy-soft:#9fb1c8; --gold:#cfae6c; --steel:#78a3d2;
+  --accent:#8fb3dc; --accent-ink:#0a0f16; --accent-soft:#1b2a3d; --rule:#4a6a94;
+  --up:#ff6b6b; --down:#3fc98a; --warn:#f0a43a; --flat:#8995a6; color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#0f1514; --surface:#161e1d; --sunk:#1c2625; --ink:#e3ebe9; --muted:#93a29e; --line:#2a3634;
-  --accent:#58b6bb; --accent-ink:#0b1514; --accent-soft:#1d3536;
-  --up:#ff6b6b; --down:#3fcb8b; --warn:#f0a43a; --flat:#8a9794; color-scheme:dark}
+  --bg:#0a0f16; --surface:#111925; --sunk:#172231; --ink:#e4e9f0; --muted:#97a3b4; --line:#253244;
+  --navy:#0e2340; --navy-ink:#eef2f7; --navy-soft:#9fb1c8; --gold:#cfae6c; --steel:#78a3d2;
+  --accent:#8fb3dc; --accent-ink:#0a0f16; --accent-soft:#1b2a3d; --rule:#4a6a94;
+  --up:#ff6b6b; --down:#3fc98a; --warn:#f0a43a; --flat:#8995a6; color-scheme:dark}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 40px}
 body.usconv{--up-c:var(--down);--down-c:var(--up)} body{--up-c:var(--up);--down-c:var(--down)}
@@ -184,6 +187,55 @@ tr.bs-hit td:first-child{box-shadow:inset 3px 0 0 var(--up-c)}
 .delta{font-family:var(--f-num)}
 .grid td.wrapc{white-space:normal;min-width:180px}
 #wlMsg:empty,#wlOther:empty{display:none}
+
+/* ---- investment-bank presentation layer ---- */
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--navy)}
+.wrap{gap:18px}
+.bar{background:var(--navy);color:var(--navy-ink);border-bottom:2px solid var(--gold);box-shadow:0 0 0 100vmax var(--navy);clip-path:inset(0 -100vmax);padding-block:12px 10px}
+.brand h1{font-weight:700;font-size:22px;letter-spacing:.06em;color:var(--navy-ink)}
+.brand .sub{color:var(--navy-soft);font-family:var(--f-body);font-size:11px;letter-spacing:.22em}
+.bar .tabs{background:transparent;padding:0;gap:0;border-radius:0}
+.bar .tabs button{color:var(--navy-soft);border-radius:0;padding:6px 14px;border-bottom:2px solid transparent;letter-spacing:.04em}
+.bar .tabs button[aria-selected="true"]{background:transparent;color:var(--navy-ink);box-shadow:none;border-bottom-color:var(--gold);font-weight:600}
+.bar .status{color:var(--navy-soft);font-variant-numeric:tabular-nums}
+.bar .btn{background:transparent;color:var(--navy-ink);border-color:var(--navy-soft)}
+.bar .btn.primary{background:var(--gold);border-color:var(--gold);color:#14202e;font-weight:600}
+.btn{border-radius:var(--r);font-weight:500}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:var(--navy-ink)}
+.panel{border-radius:var(--r);border:1px solid var(--line);border-top:3px solid var(--rule);padding:16px 18px;box-shadow:0 1px 2px rgba(11,37,69,.05)}
+.panel>h2,.panel>.sec-head h2{font-family:var(--f-body);font-size:15px;font-weight:700;letter-spacing:.02em;color:var(--ink);text-transform:none}
+.panel>h2{padding-bottom:8px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.sec-head{padding-bottom:8px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.pulse .panel{border-top-width:1px;border-left:3px solid var(--steel)}
+.pulse .panel h2,.spark-title{font-size:11px;letter-spacing:.14em;color:var(--muted);font-weight:600;border:0;padding:0;margin:0 0 6px}
+.tabs{border-radius:var(--r);flex-wrap:wrap;max-width:100%}
+.sec-head>*{min-width:0}
+.tabs button{border-radius:var(--r)}
+.tabs button[aria-selected="true"]{color:var(--ink);font-weight:600;box-shadow:inset 0 -2px 0 var(--gold)}
+/* tables: ruled, tabular, navy header rule */
+table.grid,.mq{font-variant-numeric:tabular-nums}
+.grid th,.mq thead th{background:var(--sunk);color:var(--ink);font-weight:600;font-size:11.5px;letter-spacing:.04em;border-bottom:1.5px solid var(--rule)}
+.grid td,.mq td{border-bottom:1px solid var(--line)}
+.grid tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--sunk) 45%,transparent)}
+.grid tbody tr:hover td{background:var(--accent-soft)}
+.mq tr.best td{background:var(--accent-soft);font-weight:600}
+.num,.v1,.pp,.sv,.big,.delta,.cd,.rk,.v2{font-variant-numeric:tabular-nums}
+.big{font-family:var(--f-num);font-weight:600;letter-spacing:-.01em}
+.cd{color:var(--steel)}
+.meter i,.subcell .bar2 i,.subs i{background:var(--steel)}
+.rcard{border-radius:var(--r);background:var(--surface);border-top:2px solid var(--steel)}
+.rcard h3{font-size:13px;letter-spacing:.02em}
+.chip,.pill,.sig,.bs,.trait{border-radius:var(--r)}
+.wts{border-radius:var(--r);background:var(--sunk)}
+.hint{font-size:11.5px;line-height:1.6}
+.note{font-size:11.5px}
+.sheet{background:var(--surface)}
+.sheet-head{padding-bottom:10px;border-bottom:2px solid var(--rule)}
+.sheet-head h3{font-weight:700}
+.sheet .panel{box-shadow:none}
+.confirm-box{border-radius:var(--r);border-top:3px solid var(--rule)}
+.wrap>p.note:last-child{border-top:1px solid var(--line);padding-top:10px;letter-spacing:.02em}
+svg text{font-family:var(--f-num)}
 @media (max-width:640px){
   .hide-sm{display:none}
   .brand h1{font-size:20px}
@@ -458,7 +510,7 @@ function spark(d, v, w=220, h=48){
   const base = min < 0 && max > 0 ? y(0) : h - 4;
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" width="100%" height="${h}" role="img" aria-label="走勢">
     <polygon points="2,${base} ${pts} ${w-2},${base}" fill="var(--accent-soft)"/>${zero}
-    <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+    <polyline points="${pts}" fill="none" stroke="var(--steel)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
     <div class="sdates"><span>${esc(d[0])}</span><span>${esc(d[d.length-1])}</span></div>`;
 }
 
@@ -1223,7 +1275,7 @@ $("wlForm").addEventListener("submit", async e => {
 const mini = v => { const xs = v.filter(x => x != null); if (xs.length < 2) return `<span class="muted">—</span>`;
   const w = 96, h = 24, lo = Math.min(...xs), hi = Math.max(...xs), sp = hi - lo || 1;
   const pts = v.map((x,i) => x == null ? null : `${(2 + i*(w-4)/(v.length-1)).toFixed(1)},${(3 + (h-6)*(1-(x-lo)/sp)).toFixed(1)}`).filter(Boolean).join(" ");
-  return `<svg class="mini" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="近60日籌碼分數"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`; };
+  return `<svg class="mini" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="近60日籌碼分數"><polyline points="${pts}" fill="none" stroke="var(--steel)" stroke-width="1.5"/></svg>`; };
 let wlToken = 0;
 async function renderWatch(){
   const tb = $("wlRows"), mine = WL.items.filter(x => x.m === S.market), sc = S.screen[S.market], tok = ++wlToken;
